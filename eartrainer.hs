@@ -22,10 +22,13 @@ data Flag
   | LargeRange
     deriving (Eq, Show)
 
+type CadenceFun = Scale -> Pitch -> Voice
+
 data Excercise
    = Excercise {
        keyRoot :: Pitch
      , scale :: Scale
+     , cadenceGen :: CadenceFun
      , notesTempo :: Int
      , largeRange :: Bool
      , numNotes :: Int
@@ -57,7 +60,7 @@ options =
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale 120 False 1 1
+defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 120 False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -71,7 +74,7 @@ parseRequest str = Other str
 
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
-excercise p ex@(Excercise root scale@(Scale _ solf) notesTempo
+excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
                 largeRange numNotes numQuestions) currentQ = do
     let tempo = BPM 120
     cadenceOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
@@ -81,7 +84,7 @@ excercise p ex@(Excercise root scale@(Scale _ solf) notesTempo
     pitches <- genPitches octave numNotes
     let melodyRoot = root `changeOctave` octave
         melody  = map (\(p,solfege) -> PitchE p 2) pitches
-        cadence = cadence_gen_IV_V7_I scale cadenceRoot 
+        cadence = cadence_minmaj_IV_V7_I scale cadenceRoot 
     let handleRequest PlayScale =
           let pitches = take (scaleLength scale + 1) $ scalePitches scale melodyRoot in
           playVoice p tempo (map (\p -> PitchE p 1) pitches)
@@ -131,7 +134,7 @@ excercise p ex@(Excercise root scale@(Scale _ solf) notesTempo
 
       genPitch octave_ = do
         octave  <- if largeRange then randomInt 1 6 else return octave_
-        degree <- randomInt 1 (scaleLength scale)
+        degree <- randomInt 1 (scaleLength scale + 1)
         let pitch   = scaleDegreePitch scale (root `changeOctave` octave) degree
             solfege = scaleDegreeSolfege scale degree
         return (pitch, solfege)
@@ -141,8 +144,9 @@ excercise p ex@(Excercise root scale@(Scale _ solf) notesTempo
       pitchDesc cadenceRoot (pitch, solfege) =
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show cadenceRoot)
 
-scaleOfStr "maj" = majorScale
-scaleOfStr "min" = minorScale
+scaleOfStr "maj" = (majorScale, cadence_minmaj_IV_V7_I)
+scaleOfStr "majch" = (majorChScale, cadence_chmaj_IV_V7_I)
+scaleOfStr "min" = (minorScale, cadence_minmaj_IV_V7_I)
 scaleOfStr _ = error "unknown scale"
 
 main = do
@@ -157,7 +161,7 @@ main = do
       keyRoot = foldr getKeyRoot pitchC0 flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
-      scaleType = foldr getST majorScale flags
+      (scaleType,cadence) = foldr getST (majorScale,cadence_minmaj_IV_V7_I) flags
       getDevice (Device str) _ = str
       getDevice _ str = str
       getST (ScaleType str) _ = scaleOfStr str
@@ -174,7 +178,7 @@ main = do
       getKeyRoot _ x = x
       
   Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise keyRoot scaleType notesTempo largeRange notes questions) 1
+    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange notes questions) 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   
   where

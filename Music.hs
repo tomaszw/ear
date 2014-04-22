@@ -62,13 +62,20 @@ chordOnScale scale scaleRoot degrees =
   in
   Chord (scaleRoot `transpose` head dists) (map (\d -> d - dist0) $ tail dists)
 
-cadence_gen_IV_V7_I :: Scale -> Pitch -> Voice
-cadence_gen_IV_V7_I scale scaleRoot =
+cadence_minmaj_IV_V7_I :: Scale -> Pitch -> Voice
+cadence_minmaj_IV_V7_I scale scaleRoot =
   let ch dur degs = ChordE (chordOnScale scale scaleRoot degs) dur in
   [ ch 1.5 [1, 4, 6]
   , ch 1.5 [2, 4, 5, 7]
   , ch 3.0 [1, 3, 5] ]
-  
+
+cadence_chmaj_IV_V7_I :: Scale -> Pitch -> Voice
+cadence_chmaj_IV_V7_I scale scaleRoot =
+  let ch dur degs = ChordE (chordOnScale scale scaleRoot degs) dur in
+  [ ch 1.5 [1, 6, 10]
+  , ch 1.5 [3, 6, 8, 11]
+  , ch 3.0 [1, 5, 8] ]
+
 cadence_maj_IV_V7_I :: Pitch -> Voice
 cadence_maj_IV_V7_I r =
   [ ChordE (chordMaj $ r `shiftI` Maj4) 1.5
@@ -77,10 +84,13 @@ cadence_maj_IV_V7_I r =
   ]
 
 majorScale = Scale [Unison, Maj2, Maj3, Maj4, Maj5, Maj6, Maj7] majorScaleSolfege
-minorScale = Scale [Unison, Maj2, Min3, Maj4, Maj5, Min6, Min7] minorScaleSolfege
-
 majorScaleSolfege = ["do", "re", "mi", "fa", "so", "la", "ti"]
+
+minorScale = Scale [Unison, Maj2, Min3, Maj4, Maj5, Min6, Min7] minorScaleSolfege
 minorScaleSolfege = ["do", "re", "me", "fa", "so", "le", "te"]
+
+majorChScale = Scale [Unison, Min2, Maj2, Min3, Maj3, Maj4, Aug4, Maj5, Min6, Maj6, Min7, Maj7] majorChScaleSolfege
+majorChScaleSolfege = ["do", "di", "re", "ri", "mi", "fa", "fi", "so", "si", "la", "li", "ti"]
 
 shiftI :: Pitch -> Interval -> Pitch
 shiftI p i = p `transpose` intervalSemitones i
@@ -99,6 +109,9 @@ scalePitches (Scale scale _) p =
     shifts  = [0,12..]
     shift (s,xs) = map (s+) xs
 
+scaleSolfege :: Scale -> [String]
+scaleSolfege (Scale _ solfege) = concat $ repeat solfege
+
 scaleDegreePitch :: Scale -> Pitch -> Int -> Pitch
 scaleDegreePitch scale root degree =
   scalePitches scale root !! (degree - 1)
@@ -111,7 +124,7 @@ scaleDegreeTonicDistance scale@(Scale s _) deg =
    12 * b + intervalSemitones (s !! a)
 
 scaleDegreeSolfege :: Scale -> Int -> String
-scaleDegreeSolfege (Scale _ solf) deg = solf !! ((deg-1) `mod` 12)
+scaleDegreeSolfege s deg = scaleSolfege s !! (deg - 1)
 
 intervalSemitones :: Interval -> Int
 intervalSemitones i =
