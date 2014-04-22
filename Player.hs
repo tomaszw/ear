@@ -44,8 +44,12 @@ withPlayer device f = do
         Queue.control h q Event.QueueStart Nothing
         f (Player h p q conn)
 
+event (Player h p q conn) ev t =
+  Event.output h $
+    (Event.forConnection conn ev) { Event.queue = q, Event.time = Time.consAbs (Time.Tick $ timeConv t) }
+  
 queueNote :: Player -> (Pitch, Time, Time) -> IO ()
-queueNote (Player h p q conn) (pitch, t0, t1) = do
+queueNote player@(Player h p q conn) (pitch, t0, t1) = do
   let on = Event.NoteEv Event.NoteOn $
              Event.simpleNote
                (Event.Channel 0)
@@ -57,8 +61,8 @@ queueNote (Player h p q conn) (pitch, t0, t1) = do
                 (Event.Pitch $ pitchValue pitch)
                 Event.normalVelocity
 
-  Event.output h $ (Event.forConnection conn on)  { Event.queue = q, Event.time = Time.consAbs (Time.Tick $ timeConv t0) }
-  Event.output h $ (Event.forConnection conn off) { Event.queue = q, Event.time = Time.consAbs (Time.Tick $ timeConv t1) }
+  event player on t0
+  event player off t1
   return ()
 
 queueNotes :: Player -> [(Pitch, Time, Time)] -> IO ()
@@ -71,6 +75,8 @@ playVoice :: Player -> BPM -> Voice -> IO ()
 playVoice p@(Player h _ q conn) (BPM bpm) v = do
   Queue.control h q Event.QueueStart Nothing
   Queue.control h q (Event.QueueTempo (Event.Tempo (60000000 `div` fromIntegral bpm))) Nothing
+  event p (Event.CtrlEv Event.PgmChange $ Event.Ctrl (Event.Channel 0) (Event.Parameter 0) (Event.Value 0)) 0
+  
   mapM_ (queueNote p) notes
   echo p endTime
   _ <- Event.drainOutput h

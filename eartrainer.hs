@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Monad
+import Data.List
 
 import System.Environment
 import System.Console.GetOpt
@@ -13,15 +14,20 @@ import Player
 data Flag
   = RandomKey
   | Device String
-  | Notes String
+  | Notes String 
+  | NotesTempo String
   | Questions String
   | KeyRoot String
+  | ScaleType String
+  | LargeRange
     deriving (Eq, Show)
 
 data Excercise
    = Excercise {
        keyRoot :: Pitch
      , scale :: Scale
+     , notesTempo :: Int
+     , largeRange :: Bool
      , numNotes :: Int
      , numQuestions :: Int }
 
@@ -44,11 +50,14 @@ options =
   [ Option ['r'] [] (NoArg RandomKey) "randomize key"
   , Option ['k'] [] (ReqArg KeyRoot "PITCH") "key root, such as C,C#,D,D#,E,F,F#,G,G#,B"
   , Option ['n'] [] (ReqArg Notes "NUMBER") "number of notes to guess at once"
-  , Option ['q'] [] (ReqArg Questions "NUMBER") "number of questions in excercise"
+  , Option ['q'] [] (ReqArg Questions "NUMBER") "number of questions in exercise"
+  , Option ['t'] [] (ReqArg NotesTempo "BPM") "tempo for note playback"
   , Option ['d'] [] (ReqArg Device "DEVICE") "playback midi device"
+  , Option ['s'] [] (ReqArg ScaleType "SCALE") "type of scale (maj/min)"
+  , Option ['l'] [] (NoArg LargeRange) "large tone range"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale 1 1
+defaultExcercise = Excercise pitchC0 majorScale 120 False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -61,28 +70,28 @@ parseRequest "?" = Help
 parseRequest str = Other str
 
 excercise :: Player -> Excercise -> Int -> IO Stats
-excercise p (Excercise _ _ _ numQuestions) q | q > numQuestions = return $ Stats 0 0
-excercise p ex@(Excercise root scale numNotes numQuestions) currentQ = do
+excercise p ex q | q > numQuestions ex = return $ Stats 0 0
+excercise p ex@(Excercise root scale@(Scale _ solf) notesTempo
+                largeRange numNotes numQuestions) currentQ = do
     let tempo = BPM 120
-    cadenceOctave <- randomInt 3 4
+    cadenceOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let cadenceRoot = root `changeOctave` cadenceOctave
     
-    octave  <- randomInt 3 4
+    octave  <- if largeRange then randomInt 1 6 else randomInt 2 5
     pitches <- genPitches octave numNotes
     let melodyRoot = root `changeOctave` octave
         melody  = map (\(p,solfege) -> PitchE p 2) pitches
-        cadence = cadence_maj_IV_V7_I cadenceRoot 
-        q = cadence ++ melody
+        cadence = cadence_gen_IV_V7_I scale cadenceRoot 
     let handleRequest PlayScale =
           let pitches = take (scaleLength scale + 1) $ scalePitches scale melodyRoot in
           playVoice p tempo (map (\p -> PitchE p 1) pitches)
         handleRequest PlayCadence = playVoice p tempo cadence
-        handleRequest PlayMelody = playVoice p tempo melody
-        handleRequest PlayQuestion = playVoice p tempo q
+        handleRequest PlayMelody = playVoice p (BPM notesTempo) melody
+        handleRequest PlayQuestion = playVoice p tempo cadence >> playVoice p (BPM notesTempo) melody
         handleRequest PlayTonic = playVoice p tempo [PitchE melodyRoot 2]
         handleRequest Help = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
         handleRequest _ = return ()
-    answer <- question handleRequest q
+    answer <- question handleRequest cadence melody
     let correctAnswer = map (\(_,solfege) -> solfege) pitches
         ok = answer == correctAnswer
     if ok
@@ -91,7 +100,9 @@ excercise p ex@(Excercise root scale numNotes numQuestions) currentQ = do
     mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
     putStrLn "Press ENTER to continue.."
     let loopReq =
-          do req <- parseRequest `fmap` getLine
+          do putStr ">> "
+             hFlush stdout
+             req <- parseRequest `fmap` getLine
              case req of
                Other "" -> return ()
                _ -> handleRequest req >> loopReq
@@ -101,24 +112,27 @@ excercise p ex@(Excercise root scale numNotes numQuestions) currentQ = do
       if ok then Stats (correct+1) wrong
             else Stats correct (wrong+1)
     where
-      question handleRequest melody = do
+      question handleRequest cadence melody = do
         putStrLn $ "Question " ++ show currentQ
         hFlush stdout
-        playVoice p (BPM 120) melody
+        playVoice p (BPM 120) cadence
+        playVoice p (BPM notesTempo) melody
+        let solfegeStr = intercalate " " solf
         let ask =
-              do putStr ">> "
+              do putStr $ "[" ++ solfegeStr ++ "] >> "
                  hFlush stdout
                  r <- return . parseRequest =<< getLine
                  case r of
                    Other str -> case words str of
-                     [] -> question handleRequest melody
+                     [] -> question handleRequest cadence melody
                      ws -> return ws
                    req       -> handleRequest req >> ask
         ask
 
-      genPitch octave = do
+      genPitch octave_ = do
+        octave  <- if largeRange then randomInt 1 6 else return octave_
         degree <- randomInt 1 (scaleLength scale)
-        let pitch   = scaleDegreePitch scale root degree `changeOctave` octave
+        let pitch   = scaleDegreePitch scale (root `changeOctave` octave) degree
             solfege = scaleDegreeSolfege scale degree
         return (pitch, solfege)
         
@@ -127,6 +141,10 @@ excercise p ex@(Excercise root scale numNotes numQuestions) currentQ = do
       pitchDesc cadenceRoot (pitch, solfege) =
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show cadenceRoot)
 
+scaleOfStr "maj" = majorScale
+scaleOfStr "min" = minorScale
+scaleOfStr _ = error "unknown scale"
+
 main = do
   args_ <- getArgs
   (flags, args) <- case getOpt Permute options args_ of
@@ -134,13 +152,20 @@ main = do
     (_,_,errs) -> ioError (userError (concat errs ++ usageInfo header options))
   let device = foldr getDevice "129:0" flags
       notes = foldr getNotes 1 flags
-      questions = foldr getQuestions 1 flags
+      notesTempo = foldr getNotesTempo 120 flags
+      questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
       randomKey = RandomKey `elem` flags
+      largeRange = LargeRange `elem` flags
+      scaleType = foldr getST majorScale flags
       getDevice (Device str) _ = str
       getDevice _ str = str
+      getST (ScaleType str) _ = scaleOfStr str
+      getST _ x = x
       getNotes (Notes str) _ = read str
       getNotes _ x = x
+      getNotesTempo (NotesTempo str) _ = read str
+      getNotesTempo _ x = x
       getQuestions (Questions str) _ = read str
       getQuestions _ x = x
       getKeyRoot (KeyRoot str) x = case pitchFromName str of
@@ -149,7 +174,7 @@ main = do
       getKeyRoot _ x = x
       
   Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise keyRoot majorScale notes questions) 1
+    excercise p (Excercise keyRoot scaleType notesTempo largeRange notes questions) 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   
   where

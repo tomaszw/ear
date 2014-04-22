@@ -55,6 +55,20 @@ chordMajD7 p = ChordI p [Maj3, Maj5, Min7]
 chordMinD7 p = ChordI p [Min3, Maj5, Min7]
 chordMaj7 p = ChordI p [Maj3, Maj5, Maj7]
 
+chordOnScale :: Scale -> Pitch -> [Int] -> Chord
+chordOnScale scale scaleRoot degrees =
+  let dists = map (scaleDegreeTonicDistance scale) degrees
+      dist0 = head dists
+  in
+  Chord (scaleRoot `transpose` head dists) (map (\d -> d - dist0) $ tail dists)
+
+cadence_gen_IV_V7_I :: Scale -> Pitch -> Voice
+cadence_gen_IV_V7_I scale scaleRoot =
+  let ch dur degs = ChordE (chordOnScale scale scaleRoot degs) dur in
+  [ ch 1.5 [1, 4, 6]
+  , ch 1.5 [2, 4, 5, 7]
+  , ch 3.0 [1, 3, 5] ]
+  
 cadence_maj_IV_V7_I :: Pitch -> Voice
 cadence_maj_IV_V7_I r =
   [ ChordE (chordMaj $ r `shiftI` Maj4) 1.5
@@ -90,8 +104,11 @@ scaleDegreePitch scale root degree =
   scalePitches scale root !! (degree - 1)
 
 scaleDegreeTonicDistance :: Scale -> Int -> Int
-scaleDegreeTonicDistance (Scale s _) deg =
-  intervalSemitones (s !! ((deg-1) `mod` 12))
+scaleDegreeTonicDistance scale@(Scale s _) deg =
+  let a = (deg-1) `mod` (scaleLength scale)
+      b = (deg-1) `div` (scaleLength scale)
+  in
+   12 * b + intervalSemitones (s !! a)
 
 scaleDegreeSolfege :: Scale -> Int -> String
 scaleDegreeSolfege (Scale _ solf) deg = solf !! ((deg-1) `mod` 12)
