@@ -105,4 +105,4 @@ waitForEcho pl@(Player h p q conn) = do
       if Event.source event == me
       then return ()
       else waitForEcho pl
-    _ -> putStrLn "WTF?" >> waitForEcho pl
+    _ -> putStrLn ("Event: " ++ show event) >> waitForEcho pl
