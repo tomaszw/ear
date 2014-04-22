@@ -73,7 +73,7 @@ cadence_chmaj_IV_V7_I :: Scale -> Pitch -> Voice
 cadence_chmaj_IV_V7_I scale scaleRoot =
   let ch dur degs = ChordE (chordOnScale scale scaleRoot degs) dur in
   [ ch 1.5 [1, 6, 10]
-  , ch 1.5 [3, 6, 8, 11]
+  , ch 1.5 [3, 6, 8, 12]
   , ch 3.0 [1, 5, 8] ]
 
 cadence_maj_IV_V7_I :: Pitch -> Voice

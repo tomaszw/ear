@@ -80,11 +80,11 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
     cadenceOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let cadenceRoot = root `changeOctave` cadenceOctave
     
-    octave  <- if largeRange then randomInt 1 6 else randomInt 2 5
+    octave  <- if largeRange then randomInt 1 5 else randomInt 2 4
     pitches <- genPitches octave numNotes
     let melodyRoot = root `changeOctave` octave
         melody  = map (\(p,solfege) -> PitchE p 2) pitches
-        cadence = cadence_minmaj_IV_V7_I scale cadenceRoot 
+        cadence = cadenceGen scale cadenceRoot 
     let handleRequest PlayScale =
           let pitches = take (scaleLength scale + 1) $ scalePitches scale melodyRoot in
           playVoice p tempo (map (\p -> PitchE p 1) pitches)
@@ -133,9 +133,9 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
         ask
 
       genPitch octave_ = do
-        octave  <- if largeRange then randomInt 1 6 else return octave_
+        octave  <- if largeRange then randomInt 1 6 else randomInt octave_ (octave_+1)
         degree <- randomInt 1 (scaleLength scale + 1)
-        let pitch   = scaleDegreePitch scale (root `changeOctave` octave) degree
+        let pitch   = scaleDegreePitch scale root degree `changeOctave` octave
             solfege = scaleDegreeSolfege scale degree
         return (pitch, solfege)
         
@@ -145,7 +145,7 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show cadenceRoot)
 
 scaleOfStr "maj" = (majorScale, cadence_minmaj_IV_V7_I)
-scaleOfStr "majch" = (majorChScale, cadence_chmaj_IV_V7_I)
+scaleOfStr "chmaj" = (majorChScale, cadence_chmaj_IV_V7_I)
 scaleOfStr "min" = (minorScale, cadence_minmaj_IV_V7_I)
 scaleOfStr _ = error "unknown scale"
 
