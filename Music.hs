@@ -27,7 +27,13 @@ data Interval =
   | Oct
     deriving (Eq,Show)
 
-data Scale = Scale [Interval] Solfege deriving (Eq,Show)
+data Scale =
+     Scale {
+       scaleName :: String
+     , scaleIntervals :: [Interval]
+     , scaleSolfege_ :: Solfege
+     } deriving (Eq, Show)
+
 type Solfege = [String]
 
 data Chord =
@@ -83,45 +89,45 @@ cadence_maj_IV_V7_I r =
   , ChordE (chordMaj r) 2
   ]
 
-majorScale = Scale [Unison, Maj2, Maj3, Maj4, Maj5, Maj6, Maj7] majorScaleSolfege
+majorScale = Scale "major" [Unison, Maj2, Maj3, Maj4, Maj5, Maj6, Maj7] majorScaleSolfege
 majorScaleSolfege = ["do", "re", "mi", "fa", "so", "la", "ti"]
 
-minorScale = Scale [Unison, Maj2, Min3, Maj4, Maj5, Min6, Min7] minorScaleSolfege
+minorScale = Scale "minor" [Unison, Maj2, Min3, Maj4, Maj5, Min6, Min7] minorScaleSolfege
 minorScaleSolfege = ["do", "re", "me", "fa", "so", "le", "te"]
 
-majorChScale = Scale [Unison, Min2, Maj2, Min3, Maj3, Maj4, Aug4, Maj5, Min6, Maj6, Min7, Maj7] majorChScaleSolfege
+majorChScale = Scale "chmajor" [Unison, Min2, Maj2, Min3, Maj3, Maj4, Aug4, Maj5, Min6, Maj6, Min7, Maj7] majorChScaleSolfege
 majorChScaleSolfege = ["do", "di", "re", "ri", "mi", "fa", "fi", "so", "si", "la", "li", "ti"]
 
 shiftI :: Pitch -> Interval -> Pitch
 shiftI p i = p `transpose` intervalSemitones i
 
 scaleLength :: Scale -> Int
-scaleLength (Scale xs _) = length xs
+scaleLength = length . scaleIntervals
 
 scalePitches :: Scale -> Pitch -> [Pitch]
-scalePitches (Scale scale _) p =
+scalePitches s p =
   map (p `transpose`)
   . concat
   . map shift
   . zip shifts
-  $ repeat (map fromIntegral $ map intervalSemitones scale)
+  $ repeat (map fromIntegral $ map intervalSemitones (scaleIntervals s))
   where
     shifts  = [0,12..]
     shift (s,xs) = map (s+) xs
 
 scaleSolfege :: Scale -> [String]
-scaleSolfege (Scale _ solfege) = concat $ repeat solfege
+scaleSolfege s = concat $ repeat (scaleSolfege_ s)
 
 scaleDegreePitch :: Scale -> Pitch -> Int -> Pitch
 scaleDegreePitch scale root degree =
   scalePitches scale root !! (degree - 1)
 
 scaleDegreeTonicDistance :: Scale -> Int -> Int
-scaleDegreeTonicDistance scale@(Scale s _) deg =
-  let a = (deg-1) `mod` (scaleLength scale)
-      b = (deg-1) `div` (scaleLength scale)
+scaleDegreeTonicDistance s deg =
+  let a = (deg-1) `mod` (scaleLength s)
+      b = (deg-1) `div` (scaleLength s)
   in
-   12 * b + intervalSemitones (s !! a)
+   12 * b + intervalSemitones (scaleIntervals s !! a)
 
 scaleDegreeSolfege :: Scale -> Int -> String
 scaleDegreeSolfege s deg = scaleSolfege s !! (deg - 1)

@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Monad
+import Control.Applicative
 import Data.List
 
 import System.Environment
@@ -75,7 +76,7 @@ options =
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 60 False 1 1
+defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 0 False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -94,8 +95,8 @@ playMusic p m = playVoice p (musicTempo m) (musicVoice m)
 playQuestion :: Player -> Question -> IO ()
 playQuestion p q = playMusic p (questionContext q) >> playMusic p (question q)
 
-stateQuestion :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
-stateQuestion prompt handleRequest testAnswer =
+askQuestion :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
+askQuestion prompt handleRequest testAnswer =
   handleRequest PlayQuestion >> ask 1
   where
     ask attempts =
@@ -138,33 +139,33 @@ randomNotes count rootPitch scale minOctave maxOctave =
   
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
-excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
+excercise p ex@(Excercise root scale contextGen notesTempo
                 largeRange numNotes numQuestions) currentQ = do
-    cadenceOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
-    let cadenceRoot = root `changeOctave` cadenceOctave
+    contextOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
+    let contextRoot = root `changeOctave` contextOctave
     
-    octave  <- if largeRange then randomInt 1 5 else randomInt 2 4
-    pitches <- randomNotes numNotes root scale octave (octave+1)
+    octave <- if largeRange then randomInt 1 5 else randomInt 2 4
+    (pitches,solfege) <- unzip <$> randomNotes numNotes root scale octave (octave+1)
 
     let melodyRoot = root `changeOctave` octave
-        melody  = map (\(p,solfege) -> PitchE p 2) pitches
+        melody  = map (\p -> PitchE p 1) pitches
         quest   = Question {
-            questionContext = Music (BPM 120) (cadenceGen scale cadenceRoot)
+            questionContext = Music (BPM 120) (contextGen scale contextRoot)
           , questionScale = scale
           , questionScaleRoot = root
           , question = Music (BPM notesTempo) melody
           }
 
-    let testAnswer s =
-          let correctAnswer = map (\(_,solfege) -> solfege) pitches in
-          s == correctAnswer
-    let prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
-        solfegeStr = intercalate " " solf
+        testAnswer degrees =
+          length degrees == length solfege && (all correct $ zip [1..] degrees)
+          where
+          correct (index, s) =
+            s == (solfege !! index)
         
-    guessedIn <- stateQuestion prompt (handleRequest p quest)  testAnswer
+    guessedIn <- askQuestion prompt (handleRequest p quest) testAnswer
     when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
-      mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
+      mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc contextRoot) $ zip pitches solfege
     putStrLn "Press ENTER to continue.."
     let loopReq =
           do putStr ">> "
@@ -180,8 +181,10 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
          then Stats (correct+1) wrong
          else Stats correct (wrong+1)
     where
-      pitchDesc cadenceRoot (pitch, solfege) =
-          solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show cadenceRoot)
+      prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
+      solfegeStr = intercalate " " $ take (scaleLength scale) (scaleSolfege scale)
+      pitchDesc contextRoot (pitch, solfege) =
+          solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show contextRoot)
 
 scaleOfStr "maj" = (majorScale, cadence_minmaj_IV_V7_I)
 scaleOfStr "chmaj" = (majorChScale, cadence_chmaj_IV_V7_I)
@@ -195,7 +198,7 @@ main = do
     (_,_,errs) -> ioError (userError (concat errs ++ usageInfo header options))
   let device = foldr getDevice "129:0" flags
       notes = foldr getNotes 1 flags
-      notesTempo = foldr getNotesTempo 120 flags
+      notesTempo = foldr getNotesTempo 30 flags
       questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
       randomKey = RandomKey `elem` flags
