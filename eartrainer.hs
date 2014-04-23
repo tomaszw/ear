@@ -40,6 +40,7 @@ data Request
    | PlayCadence
    | PlayMelody
    | PlayTonic
+   | Next
    | Help
    | Other String
 
@@ -60,7 +61,7 @@ options =
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 120 False 1 1
+defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 60 False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -69,6 +70,7 @@ parseRequest "c" = PlayCadence
 parseRequest "m" = PlayMelody
 parseRequest "h" = Help
 parseRequest "t" = PlayTonic
+parseRequest "n" = Next
 parseRequest "?" = Help
 parseRequest str = Other str
 
@@ -94,13 +96,18 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
         handleRequest PlayTonic = playVoice p tempo [PitchE melodyRoot 2]
         handleRequest Help = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
         handleRequest _ = return ()
-    answer <- question handleRequest cadence melody
-    let correctAnswer = map (\(_,solfege) -> solfege) pitches
-        ok = answer == correctAnswer
-    if ok
-       then putStrLn "GOOD!"
-       else putStrLn "BAD!"
-    mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
+    let testAnswer s =
+          let correctAnswer = map (\(_,solfege) -> solfege) pitches in
+          s == correctAnswer
+    let prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
+        solfegeStr = intercalate " " solf
+        
+    (ok, finallyOk) <- question handleRequest prompt testAnswer
+    when finallyOk $
+       putStrLn "GOOD!"
+    when (not finallyOk) $ do
+      putStrLn "Correct answer was:"
+      mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
     putStrLn "Press ENTER to continue.."
     let loopReq =
           do putStr ">> "
@@ -115,22 +122,21 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
       if ok then Stats (correct+1) wrong
             else Stats correct (wrong+1)
     where
-      question handleRequest cadence melody = do
-        putStrLn $ "Question " ++ show currentQ
-        hFlush stdout
-        playVoice p (BPM 120) cadence
-        playVoice p (BPM notesTempo) melody
-        let solfegeStr = intercalate " " solf
-        let ask =
-              do putStr $ "[" ++ solfegeStr ++ "] >> "
-                 hFlush stdout
-                 r <- return . parseRequest =<< getLine
-                 case r of
-                   Other str -> case words str of
-                     [] -> question handleRequest cadence melody
-                     ws -> return ws
-                   req       -> handleRequest req >> ask
-        ask
+      question handleRequest prompt testAnswer = do
+          handleRequest PlayQuestion
+          let ask correct =
+                do putStr prompt
+                   hFlush stdout
+                   r <- return . parseRequest =<< getLine
+                   case r of
+                     Next -> return (False, False)
+                     Other str -> case words str of
+                       [] -> handleRequest PlayQuestion >> ask correct
+                       ws -> case testAnswer ws of
+                         True -> return (correct, True)
+                         _    -> putStrLn "NO!" >> ask False
+                     req -> handleRequest req >> ask correct
+          ask True
 
       genPitch octave_ = do
         octave  <- if largeRange then randomInt 1 6 else randomInt octave_ (octave_+1)
