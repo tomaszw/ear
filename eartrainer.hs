@@ -10,6 +10,7 @@ import System.IO
 
 import Pitch
 import Music
+import Scales
 import Player
 
 data Flag
@@ -51,9 +52,9 @@ data Question
 
 data Request
    = PlayScale
+   | PlayAll
+   | PlayContext
    | PlayQuestion
-   | PlayCadence
-   | PlayMelody
    | PlayTonic
    | Next
    | Help
@@ -67,7 +68,7 @@ data Stats
 options :: [OptDescr Flag]
 options =
   [ Option ['r'] [] (NoArg RandomKey) "randomize key"
-  , Option ['k'] [] (ReqArg KeyRoot "PITCH") "key root, such as C,C#,D,D#,E,F,F#,G,G#,B"
+  , Option ['k'] [] (ReqArg KeyRoot "PITCH") "specify key, such as C,C#,D,D#,E,F,F#,G,G#,B"
   , Option ['n'] [] (ReqArg Notes "NUMBER") "number of notes to guess at once"
   , Option ['q'] [] (ReqArg Questions "NUMBER") "number of questions in exercise"
   , Option ['t'] [] (ReqArg NotesTempo "BPM") "tempo for note playback"
@@ -80,9 +81,9 @@ defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 0 False 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
-parseRequest "r" = PlayQuestion
-parseRequest "c" = PlayCadence
-parseRequest "m" = PlayMelody
+parseRequest "r" = PlayAll
+parseRequest "c" = PlayContext
+parseRequest "m" = PlayQuestion
 parseRequest "h" = Help
 parseRequest "t" = PlayTonic
 parseRequest "n" = Next
@@ -97,7 +98,7 @@ playQuestion p q = playMusic p (questionContext q) >> playMusic p (question q)
 
 askQuestion :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
 askQuestion prompt handleRequest testAnswer =
-  handleRequest PlayQuestion >> ask 1
+  handleRequest PlayAll >> ask 1
   where
     ask attempts =
       do putStr prompt
@@ -107,7 +108,7 @@ askQuestion prompt handleRequest testAnswer =
            Next -> return 0
            Other str ->
              case words str of
-               [] -> handleRequest PlayQuestion >> ask attempts
+               [] -> handleRequest PlayAll >> ask attempts
                ws -> case testAnswer ws of
                  True -> putStrLn "GOOD!" >> return attempts
                  _    -> putStrLn "NO!"   >> ask (attempts+1)
@@ -119,11 +120,11 @@ handleRequest p q req = h req where
   h PlayScale    = playVoice p (BPM 120) (map (\p -> PitchE p 1) pitches) where
                    pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
                    scale = questionScale q
-  h PlayCadence  = playMusic p (questionContext q)
-  h PlayMelody   = playMusic p (question q)
-  h PlayQuestion = playQuestion p q
+  h PlayContext  = playMusic p (questionContext q)
+  h PlayQuestion   = playMusic p (question q)
+  h PlayAll = playQuestion p q
   h PlayTonic    = playVoice p (BPM 120) [PitchE tonicPitch 4]
-  h Help         = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
+  h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
   
 randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,String)]
@@ -160,7 +161,7 @@ excercise p ex@(Excercise root scale contextGen notesTempo
           length degrees == length solfege && (all correct $ zip [1..] degrees)
           where
           correct (index, s) =
-            s == (solfege !! index)
+            s == (solfege !! (index-1))
         
     guessedIn <- askQuestion prompt (handleRequest p quest) testAnswer
     when (guessedIn == 0) $ do
