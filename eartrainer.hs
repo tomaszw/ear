@@ -34,6 +34,18 @@ data Excercise
      , numNotes :: Int
      , numQuestions :: Int }
 
+data Music
+   = Music {
+       musicTempo :: BPM
+     , musicVoice :: Voice
+     }
+
+data Question
+   = Question {
+       questionContext :: Music
+     , question :: Music
+     }
+
 data Request
    = PlayScale
    | PlayQuestion
@@ -74,8 +86,14 @@ parseRequest "n" = Next
 parseRequest "?" = Help
 parseRequest str = Other str
 
-question :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
-question prompt handleRequest testAnswer =
+playMusic :: Player -> Music -> IO ()
+playMusic p m = playVoice p (musicTempo m) (musicVoice m)
+
+playQuestion :: Player -> Question -> IO ()
+playQuestion p q = playMusic p (questionContext q) >> playMusic p (question q)
+
+stateQuestion :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
+stateQuestion prompt handleRequest testAnswer =
   handleRequest PlayQuestion >> ask 1
   where
     ask attempts =
@@ -92,6 +110,17 @@ question prompt handleRequest testAnswer =
                  _    -> putStrLn "NO!"   >> ask (attempts+1)
            req -> handleRequest req >> ask attempts
 
+randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,String)]
+randomNotes count rootPitch scale minOctave maxOctave =
+  sequence $ replicate count randomNote
+  where
+    octaveSpan = maxOctave - minOctave + 1
+    randomNote = do
+      degree <- randomInt 1 (octaveSpan * 12 + 1)
+      let pitch   = scaleDegreePitch scale rootPitch degree
+          solfege = scaleDegreeSolfege scale degree
+      return (pitch, solfege)
+  
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
@@ -101,17 +130,22 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
     let cadenceRoot = root `changeOctave` cadenceOctave
     
     octave  <- if largeRange then randomInt 1 5 else randomInt 2 4
-    pitches <- genPitches octave numNotes
+    pitches <- randomNotes numNotes root scale octave (octave+1)
+
     let melodyRoot = root `changeOctave` octave
         melody  = map (\(p,solfege) -> PitchE p 2) pitches
-        cadence = cadenceGen scale cadenceRoot 
-    let handleRequest PlayScale =
+        quest   = Question {
+            questionContext = Music (BPM 120) (cadenceGen scale cadenceRoot)
+          , question = Music (BPM notesTempo) melody
+          }
+
+        handleRequest PlayScale =
           let pitches = take (scaleLength scale + 1) $ scalePitches scale melodyRoot in
           playVoice p tempo (map (\p -> PitchE p 1) pitches)
-        handleRequest PlayCadence = playVoice p tempo cadence
-        handleRequest PlayMelody = playVoice p (BPM notesTempo) melody
-        handleRequest PlayQuestion = playVoice p tempo cadence >> playVoice p (BPM notesTempo) melody
-        handleRequest PlayTonic = playVoice p tempo [PitchE melodyRoot 2]
+        handleRequest PlayCadence  = playMusic p (questionContext quest)
+        handleRequest PlayMelody   = playMusic p (question quest)
+        handleRequest PlayQuestion = playQuestion p quest
+        handleRequest PlayTonic    = playVoice p tempo [PitchE melodyRoot 2]
         handleRequest Help = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
         handleRequest _ = return ()
     let testAnswer s =
@@ -120,7 +154,7 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
     let prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
         solfegeStr = intercalate " " solf
         
-    guessedIn <- question prompt handleRequest testAnswer
+    guessedIn <- stateQuestion prompt handleRequest testAnswer
     when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
       mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
@@ -139,15 +173,6 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
          then Stats (correct+1) wrong
          else Stats correct (wrong+1)
     where
-      genPitch octave_ = do
-        octave  <- if largeRange then randomInt 1 6 else randomInt octave_ (octave_+1)
-        degree <- randomInt 1 (scaleLength scale + 1)
-        let pitch   = scaleDegreePitch scale root degree `changeOctave` octave
-            solfege = scaleDegreeSolfege scale degree
-        return (pitch, solfege)
-        
-      genPitches octave n = sequence . replicate n $ genPitch octave
-     
       pitchDesc cadenceRoot (pitch, solfege) =
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show cadenceRoot)
 
