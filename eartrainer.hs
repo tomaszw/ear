@@ -43,6 +43,8 @@ data Music
 data Question
    = Question {
        questionContext :: Music
+     , questionScale :: Scale
+     , questionScaleRoot :: Pitch
      , question :: Music
      }
 
@@ -110,6 +112,19 @@ stateQuestion prompt handleRequest testAnswer =
                  _    -> putStrLn "NO!"   >> ask (attempts+1)
            req -> handleRequest req >> ask attempts
 
+handleRequest :: Player -> Question -> Request -> IO ()
+handleRequest p q req = h req where
+  tonicPitch = questionScaleRoot q `changeOctave` 4
+  h PlayScale    = playVoice p (BPM 120) (map (\p -> PitchE p 1) pitches) where
+                   pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
+                   scale = questionScale q
+  h PlayCadence  = playMusic p (questionContext q)
+  h PlayMelody   = playMusic p (question q)
+  h PlayQuestion = playQuestion p q
+  h PlayTonic    = playVoice p (BPM 120) [PitchE tonicPitch 4]
+  h Help         = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
+  h _            = return ()
+  
 randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,String)]
 randomNotes count rootPitch scale minOctave maxOctave =
   sequence $ replicate count randomNote
@@ -117,7 +132,7 @@ randomNotes count rootPitch scale minOctave maxOctave =
     octaveSpan = maxOctave - minOctave + 1
     randomNote = do
       degree <- randomInt 1 (octaveSpan * 12 + 1)
-      let pitch   = scaleDegreePitch scale rootPitch degree
+      let pitch   = scaleDegreePitch scale (rootPitch `changeOctave` minOctave) degree
           solfege = scaleDegreeSolfege scale degree
       return (pitch, solfege)
   
@@ -125,7 +140,6 @@ excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
                 largeRange numNotes numQuestions) currentQ = do
-    let tempo = BPM 120
     cadenceOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let cadenceRoot = root `changeOctave` cadenceOctave
     
@@ -136,25 +150,18 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
         melody  = map (\(p,solfege) -> PitchE p 2) pitches
         quest   = Question {
             questionContext = Music (BPM 120) (cadenceGen scale cadenceRoot)
+          , questionScale = scale
+          , questionScaleRoot = root
           , question = Music (BPM notesTempo) melody
           }
 
-        handleRequest PlayScale =
-          let pitches = take (scaleLength scale + 1) $ scalePitches scale melodyRoot in
-          playVoice p tempo (map (\p -> PitchE p 1) pitches)
-        handleRequest PlayCadence  = playMusic p (questionContext quest)
-        handleRequest PlayMelody   = playMusic p (question quest)
-        handleRequest PlayQuestion = playQuestion p quest
-        handleRequest PlayTonic    = playVoice p tempo [PitchE melodyRoot 2]
-        handleRequest Help = putStrLn "'r' - repeat question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
-        handleRequest _ = return ()
     let testAnswer s =
           let correctAnswer = map (\(_,solfege) -> solfege) pitches in
           s == correctAnswer
     let prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
         solfegeStr = intercalate " " solf
         
-    guessedIn <- stateQuestion prompt handleRequest testAnswer
+    guessedIn <- stateQuestion prompt (handleRequest p quest)  testAnswer
     when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
       mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
@@ -165,7 +172,7 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
              req <- parseRequest `fmap` getLine
              case req of
                Other "" -> return ()
-               _ -> handleRequest req >> loopReq
+               _ -> handleRequest p quest req >> loopReq
     loopReq
     Stats correct wrong <- excercise p ex (currentQ+1)
     return $ 
