@@ -131,7 +131,7 @@ randomNotes count rootPitch scale minOctave maxOctave =
   where
     octaveSpan = maxOctave - minOctave + 1
     randomNote = do
-      degree <- randomInt 1 (octaveSpan * 12 + 1)
+      degree <- randomInt 1 (octaveSpan * 12)
       let pitch   = scaleDegreePitch scale (rootPitch `changeOctave` minOctave) degree
           solfege = scaleDegreeSolfege scale degree
       return (pitch, solfege)
