@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Music where
 
+import Data.Char
 import Data.Word
 import Data.Maybe
 import System.Random
@@ -33,6 +34,8 @@ data Scale =
      , scaleIntervals :: [Interval]
      , scaleSolfege_ :: Solfege
      } deriving (Eq, Show)
+
+type ScaleDegree = Int
 
 type Solfege = [String]
 
@@ -74,6 +77,10 @@ shiftI p i = p `transpose` intervalSemitones i
 scaleLength :: Scale -> Int
 scaleLength = length . scaleIntervals
 
+normaliseDegree :: Scale -> ScaleDegree -> ScaleDegree
+normaliseDegree s d =
+  1 + ((d-1) `mod` (scaleLength s))
+
 scalePitches :: Scale -> Pitch -> [Pitch]
 scalePitches s p =
   map (p `transpose`)
@@ -88,18 +95,30 @@ scalePitches s p =
 scaleSolfege :: Scale -> [String]
 scaleSolfege s = concat $ repeat (scaleSolfege_ s)
 
-scaleDegreePitch :: Scale -> Pitch -> Int -> Pitch
+scaleDegreePitch :: Scale -> Pitch -> ScaleDegree -> Pitch
 scaleDegreePitch scale root degree =
   scalePitches scale root !! (degree - 1)
 
-scaleDegreeTonicDistance :: Scale -> Int -> Int
+scaleDegreeFromName :: Scale -> String -> Maybe ScaleDegree
+scaleDegreeFromName s name =
+  case num of
+    Just v | v > 0 -> Just v
+    _ | n' `elem` scaleSolfege_ s ->
+      Just . snd . head . dropWhile ((/= n') . fst) $ zip (scaleSolfege_ s) [1..]
+    _ -> Nothing
+  where
+    num :: Maybe Int
+    num = maybeRead name
+    n' = map toLower name
+
+scaleDegreeTonicDistance :: Scale -> ScaleDegree -> Int
 scaleDegreeTonicDistance s deg =
   let a = (deg-1) `mod` (scaleLength s)
       b = (deg-1) `div` (scaleLength s)
   in
    12 * b + intervalSemitones (scaleIntervals s !! a)
 
-scaleDegreeSolfege :: Scale -> Int -> String
+scaleDegreeSolfege :: Scale -> ScaleDegree -> String
 scaleDegreeSolfege s deg = scaleSolfege s !! (deg - 1)
 
 intervalSemitones :: Interval -> Int
@@ -135,6 +154,11 @@ notesFromVoice = sequence 0 where
 mapTempo :: (Time -> Time) -> SequencedVoice -> SequencedVoice
 mapTempo f = map g where
   g (p,t0,dt) = (p, f t0, f dt)
+
+maybeRead :: Read a => String -> Maybe a
+maybeRead s = case reads s of
+  [(x, _)] -> Just x
+  _ -> Nothing
 
 randomInt :: Int -> Int -> IO Int
 randomInt min max = getStdRandom (randomR (min,max))

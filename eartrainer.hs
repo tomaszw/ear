@@ -3,6 +3,7 @@ module Main where
 import Control.Monad
 import Control.Applicative
 import Data.List
+import Data.Maybe
 
 import System.Environment
 import System.Console.GetOpt
@@ -127,7 +128,7 @@ handleRequest p q req = h req where
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
   
-randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,String)]
+randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,ScaleDegree)]
 randomNotes count rootPitch scale minOctave maxOctave =
   sequence $ replicate count randomNote
   where
@@ -136,7 +137,7 @@ randomNotes count rootPitch scale minOctave maxOctave =
       degree <- randomInt 1 (octaveSpan * 12)
       let pitch   = scaleDegreePitch scale (rootPitch `changeOctave` minOctave) degree
           solfege = scaleDegreeSolfege scale degree
-      return (pitch, solfege)
+      return (pitch, normaliseDegree scale degree)
   
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
@@ -146,8 +147,8 @@ excercise p ex@(Excercise root scale contextGen notesTempo
     let contextRoot = root `changeOctave` contextOctave
     
     octave <- if largeRange then randomInt 1 5 else randomInt 2 4
-    (pitches,solfege) <- unzip <$> randomNotes numNotes root scale octave (octave+1)
-
+    (pitches,chosenDegrees) <- unzip <$> randomNotes numNotes root scale octave (octave+1)
+    let chosenSolfege = map (scaleDegreeSolfege scale) chosenDegrees
     let melodyRoot = root `changeOctave` octave
         melody  = map (\p -> PitchE p 1) pitches
         quest   = Question {
@@ -157,16 +158,21 @@ excercise p ex@(Excercise root scale contextGen notesTempo
           , question = Music (BPM notesTempo) melody
           }
 
-        testAnswer degrees =
-          length degrees == length solfege && (all correct $ zip [1..] degrees)
+        testAnswer answer =
+          case catMaybes $ map (scaleDegreeFromName scale) answer of
+            degrees | length degrees == length answer
+                    , length degrees == length chosenDegrees
+                    , all correct (zip [1..] degrees)
+                    -> True
+            _ -> False
           where
-          correct (index, s) =
-            s == (solfege !! (index-1))
+          correct (index, degree) =
+            degree == chosenDegrees !! (index-1)
         
     guessedIn <- askQuestion prompt (handleRequest p quest) testAnswer
     when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
-      mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc contextRoot) $ zip pitches solfege
+      mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc contextRoot) $ zip pitches chosenSolfege
     putStrLn "Press ENTER to continue.."
     let loopReq =
           do putStr ">> "
