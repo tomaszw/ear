@@ -74,6 +74,24 @@ parseRequest "n" = Next
 parseRequest "?" = Help
 parseRequest str = Other str
 
+question :: String -> (Request -> IO a) -> ([String] -> Bool) -> IO Int
+question prompt handleRequest testAnswer =
+  handleRequest PlayQuestion >> ask 1
+  where
+    ask attempts =
+      do putStr prompt
+         hFlush stdout
+         r <- return . parseRequest =<< getLine
+         case r of
+           Next -> return 0
+           Other str ->
+             case words str of
+               [] -> handleRequest PlayQuestion >> ask attempts
+               ws -> case testAnswer ws of
+                 True -> putStrLn "GOOD!" >> return attempts
+                 _    -> putStrLn "NO!"   >> ask (attempts+1)
+           req -> handleRequest req >> ask attempts
+
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
@@ -102,10 +120,8 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
     let prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
         solfegeStr = intercalate " " solf
         
-    (ok, finallyOk) <- question handleRequest prompt testAnswer
-    when finallyOk $
-       putStrLn "GOOD!"
-    when (not finallyOk) $ do
+    guessedIn <- question prompt handleRequest testAnswer
+    when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
       mapM_ (\l -> putStrLn ("  " ++ l)) $ map (pitchDesc cadenceRoot) pitches
     putStrLn "Press ENTER to continue.."
@@ -119,25 +135,10 @@ excercise p ex@(Excercise root scale@(Scale _ solf) cadenceGen notesTempo
     loopReq
     Stats correct wrong <- excercise p ex (currentQ+1)
     return $ 
-      if ok then Stats (correct+1) wrong
-            else Stats correct (wrong+1)
+      if guessedIn == 1
+         then Stats (correct+1) wrong
+         else Stats correct (wrong+1)
     where
-      question handleRequest prompt testAnswer = do
-          handleRequest PlayQuestion
-          let ask correct =
-                do putStr prompt
-                   hFlush stdout
-                   r <- return . parseRequest =<< getLine
-                   case r of
-                     Next -> return (False, False)
-                     Other str -> case words str of
-                       [] -> handleRequest PlayQuestion >> ask correct
-                       ws -> case testAnswer ws of
-                         True -> return (correct, True)
-                         _    -> putStrLn "NO!" >> ask False
-                     req -> handleRequest req >> ask correct
-          ask True
-
       genPitch octave_ = do
         octave  <- if largeRange then randomInt 1 6 else randomInt octave_ (octave_+1)
         degree <- randomInt 1 (scaleLength scale + 1)
