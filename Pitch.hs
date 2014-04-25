@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification, TypeSynonymInstances #-}
+{-# LANGUAGE ExistentialQuantification, TypeSynonymInstances, FlexibleInstances #-}
 module Pitch where
 
 import Data.Word
@@ -25,6 +25,12 @@ instance Pitched Word8 where
   pitchValue x = x
   toPitch x = x
 
+class Distance a where
+  semitones :: a -> Int
+
+instance Distance Int where semitones = id
+instance Distance Integer where semitones = fromIntegral . id
+
 convPitch :: (Pitched a, Pitched b) => a -> b
 convPitch x = toPitch (pitchValue x)
 
@@ -43,8 +49,8 @@ changeOctave p oct =
   let (_, deg) = pitchToOctDegree p in
   pitchFromOctDegree (oct, deg)
 
-transpose :: (Pitched a, Integral d) => a -> d -> a
-transpose p v = toPitch $ pitchValue p + fromIntegral v
+transpose :: (Pitched a, Distance d) => a -> d -> a
+transpose p v = toPitch $ pitchValue p + fromIntegral (semitones v)
 
 pitchRange :: (Pitched a) => a -> a -> [a]
 pitchRange a b = map toPitch [pitchValue a .. pitchValue b]

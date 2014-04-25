@@ -3,7 +3,7 @@ module Scales where
 import Pitch
 import Music
 
-ch r dur q i = ChordE (Chord q (r `transpose` intervalSemitones i)) dur
+ch r dur q i = ChordE (Chord q (r `transpose` i)) dur
 
 cadence_maj_IV_V7_I :: Pitch -> Voice
 cadence_maj_IV_V7_I r =

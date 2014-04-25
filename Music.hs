@@ -15,20 +15,12 @@ type Time = Double
 newtype BPM = BPM Int deriving (Eq,Show)
 
 data Interval =
-    Unison
-  | Min2
-  | Maj2
-  | Min3
-  | Maj3
-  | Maj4
-  | Aug4
-  | Maj5
-  | Min6
-  | Maj6
-  | Min7
-  | Maj7
-  | Oct
-    deriving (Eq,Show)
+    Unison | Min2 | Maj2 | Min3 | Maj3 | Maj4
+  | Aug4   | Maj5 | Min6 | Maj6 | Min7 | Maj7 | Oct
+    deriving (Eq,Enum,Ord,Show)
+
+instance Distance Interval where
+  semitones = intervalSemitones
 
 data Scale =
      Scale {
@@ -98,10 +90,10 @@ scalePitches s p =
   . concat
   . map shift
   . zip shifts
-  $ repeat (map fromIntegral $ map intervalSemitones (scaleIntervals s))
+  $ repeat (scaleIntervals s)
   where
     shifts  = [0,12..]
-    shift (s,xs) = map (s+) xs
+    shift (s,xs) = map ((+s) . intervalSemitones) xs
 
 scaleSolfege :: Scale -> [String]
 scaleSolfege s = concat $ repeat (scaleSolfege_ s)
