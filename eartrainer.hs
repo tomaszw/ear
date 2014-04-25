@@ -23,6 +23,7 @@ data Flag
   | KeyRoot String
   | ScaleType String
   | LargeRange
+  | MidiPgm String
     deriving (Eq, Show)
 
 type CadenceFun = Scale -> Pitch -> Voice
@@ -35,11 +36,14 @@ data Excercise
      , notesTempo :: Int
      , largeRange :: Bool
      , numNotes :: Int
-     , numQuestions :: Int }
+     , numQuestions :: Int
+     , midiPgm :: Int
+     }
 
 data Music
    = Music {
        musicTempo :: BPM
+     , musicPgm :: Int
      , musicVoice :: Voice
      }
 
@@ -76,9 +80,10 @@ options =
   , Option ['d'] [] (ReqArg Device "DEVICE") "playback midi device"
   , Option ['s'] [] (ReqArg ScaleType "SCALE") "type of scale (maj/min)"
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
+  , Option ['p'] [] (ReqArg MidiPgm "NUMBER") "midi program to use for melodies"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale cadence_minmaj_IV_V7_I 0 False 1 1
+defaultExcercise = Excercise pitchC0 majorScale (cad' cadence_maj_IV_V7_I) 0 False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -92,7 +97,7 @@ parseRequest "?" = Help
 parseRequest str = Other str
 
 playMusic :: Player -> Music -> IO ()
-playMusic p m = playVoice p (musicTempo m) (musicVoice m)
+playMusic p m = playVoice p (musicTempo m) (musicPgm m) (musicVoice m)
 
 playQuestion :: Player -> Question -> IO ()
 playQuestion p q = playMusic p (questionContext q) >> playMusic p (question q)
@@ -118,13 +123,13 @@ askQuestion prompt handleRequest testAnswer =
 handleRequest :: Player -> Question -> Request -> IO ()
 handleRequest p q req = h req where
   tonicPitch = questionScaleRoot q `changeOctave` 4
-  h PlayScale    = playVoice p (BPM 120) (map (\p -> PitchE p 1) pitches) where
+  h PlayScale    = playVoice p (BPM 120) 0 (map (\p -> PitchE p 1) pitches) where
                    pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
                    scale = questionScale q
   h PlayContext  = playMusic p (questionContext q)
   h PlayQuestion   = playMusic p (question q)
   h PlayAll = playQuestion p q
-  h PlayTonic    = playVoice p (BPM 120) [PitchE tonicPitch 4]
+  h PlayTonic    = playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
   
@@ -142,20 +147,20 @@ randomNotes count rootPitch scale minOctave maxOctave =
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale contextGen notesTempo
-                largeRange numNotes numQuestions) currentQ = do
+                largeRange numNotes numQuestions pgm) currentQ = do
     contextOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let contextRoot = root `changeOctave` contextOctave
     
-    octave <- if largeRange then randomInt 1 5 else randomInt 2 4
+    octave <- if largeRange then randomInt 1 4 else randomInt 2 3
     (pitches,chosenDegrees) <- unzip <$> randomNotes numNotes root scale octave (octave+1)
     let chosenSolfege = map (scaleDegreeSolfege scale) chosenDegrees
     let melodyRoot = root `changeOctave` octave
         melody  = map (\p -> PitchE p 1) pitches
         quest   = Question {
-            questionContext = Music (BPM 120) (contextGen scale contextRoot)
+            questionContext = Music (BPM 120) 0 (contextGen scale contextRoot)
           , questionScale = scale
           , questionScaleRoot = root
-          , question = Music (BPM notesTempo) melody
+          , question = Music (BPM notesTempo) pgm melody
           }
 
         testAnswer answer =
@@ -193,9 +198,18 @@ excercise p ex@(Excercise root scale contextGen notesTempo
       pitchDesc contextRoot (pitch, solfege) =
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show contextRoot)
 
-scaleOfStr "maj" = (majorScale, cadence_minmaj_IV_V7_I)
-scaleOfStr "chmaj" = (majorChScale, cadence_chmaj_IV_V7_I)
-scaleOfStr "min" = (minorScale, cadence_minmaj_IV_V7_I)
+scaleCadence :: Scale -> Pitch -> Voice
+scaleCadence s root =
+  map (\p -> PitchE p 0.5) pitches ++ [SilenceE 2] where
+    pitches = take (scaleLength s + 1) $ scalePitches s root
+
+cad' c s r = c r
+
+scaleOfStr "maj" = (majorScale, cad' cadence_maj_IV_V7_I)
+scaleOfStr "chmaj" = (majorChScale, cad' cadence_maj_IV_V7_I)
+scaleOfStr "min" = (minorScale, cad' cadence_min_IV_V7_I)
+scaleOfStr "blu" = (bluesScale, scaleCadence)
+
 scaleOfStr _ = error "unknown scale"
 
 main = do
@@ -203,20 +217,23 @@ main = do
   (flags, args) <- case getOpt Permute options args_ of
     (o,n,[]) -> return (o,n)
     (_,_,errs) -> ioError (userError (concat errs ++ usageInfo header options))
-  let device = foldr getDevice "129:0" flags
+  let device = foldr getDevice "128:0" flags
       notes = foldr getNotes 1 flags
+      pgm = foldr getPgm 0 flags
       notesTempo = foldr getNotesTempo 30 flags
       questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
-      (scaleType,cadence) = foldr getST (majorScale,cadence_minmaj_IV_V7_I) flags
+      (scaleType,cadence) = foldr getST (majorScale,cad' cadence_maj_IV_V7_I) flags
       getDevice (Device str) _ = str
       getDevice _ str = str
       getST (ScaleType str) _ = scaleOfStr str
       getST _ x = x
       getNotes (Notes str) _ = read str
       getNotes _ x = x
+      getPgm (MidiPgm str) _ = read str
+      getPgm _ x = x
       getNotesTempo (NotesTempo str) _ = read str
       getNotesTempo _ x = x
       getQuestions (Questions str) _ = read str
@@ -227,7 +244,7 @@ main = do
       getKeyRoot _ x = x
       
   Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange notes questions) 1
+    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange notes questions pgm) 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   
   where

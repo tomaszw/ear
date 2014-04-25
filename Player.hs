@@ -71,11 +71,11 @@ queueNotes p notes = mapM_ (queueNote p) notes
 timeConv :: Time -> Word32
 timeConv t = round (t * 96)
 
-playVoice :: Player -> BPM -> Voice -> IO ()
-playVoice p@(Player h _ q conn) (BPM bpm) v = do
+playVoice :: Player -> BPM -> Int -> Voice -> IO ()
+playVoice p@(Player h _ q conn) (BPM bpm) pgm v = do
   Queue.control h q Event.QueueStart Nothing
   Queue.control h q (Event.QueueTempo (Event.Tempo (60000000 `div` fromIntegral bpm))) Nothing
-  event p (Event.CtrlEv Event.PgmChange $ Event.Ctrl (Event.Channel 0) (Event.Parameter 0) (Event.Value 0)) 0
+  event p (Event.CtrlEv Event.PgmChange $ Event.Ctrl (Event.Channel 0) (Event.Parameter 0) (Event.Value $ fromIntegral pgm)) 0
   
   mapM_ (queueNote p) notes
   echo p endTime
@@ -84,7 +84,7 @@ playVoice p@(Player h _ q conn) (BPM bpm) v = do
   waitForEcho p
   where
     notes = notesFromVoice v
-    endTime = foldr (\(p,t0,t1) t -> max t t1) 0 notes
+    endTime = voiceDuration v
     
 echo :: Player -> Time -> IO ()
 echo (Player h p q conn) time = do

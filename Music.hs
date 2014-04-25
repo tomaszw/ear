@@ -4,6 +4,8 @@ module Music where
 import Data.Char
 import Data.Word
 import Data.Maybe
+import Data.List (sortBy, maximum)
+import Data.Ord
 import System.Random
 
 import Pitch
@@ -36,40 +38,49 @@ data Scale =
      } deriving (Eq, Show)
 
 type ScaleDegree = Int
+type Semitones = Int
 
 type Solfege = [String]
 
-data Chord =
-     Chord {
-       chordRoot :: Pitch
-     , chordExtensions :: [Int]
-     }
-   | ChordI {
-       chordRoot :: Pitch
-     , chordIExtensions :: [Interval]
-   }
-   deriving (Eq, Show)
+data ChordQuality =
+    ChMajor
+  | ChMinor
+  | ChMajor7
+  | ChMajorD7
+  | ChMinorD7
+  deriving (Eq, Show)
+
+data Chord = Chord ChordQuality Pitch
+             deriving (Eq, Show)
 
 type Voice = [VoiceElement]
 data VoiceElement =
     PitchE Pitch Duration
   | ChordE Chord Duration
   | SilenceE Duration
+  | VoicesE [Voice]
+  deriving (Eq, Show)
+           
+type NoteSeq = [(Pitch,Duration,Duration)]
 
-type SequencedVoice = [(Pitch,Duration,Duration)]
+chordIntervals :: ChordQuality -> [Interval]
+chordIntervals ChMajor = [Unison, Maj3, Maj5]
+chordIntervals ChMinor = [Unison, Min3, Maj5]
+chordIntervals ChMajor7 = [Unison, Maj3, Maj5, Maj7]
+chordIntervals ChMajorD7 = [Unison, Maj3, Maj5, Min7]
+chordIntervals ChMinorD7 = [Unison, Min3, Maj5, Min7]
 
-chordMaj p = ChordI p [Maj3, Maj5]
-chordMin p = ChordI p [Min3, Maj5]
-chordMajD7 p = ChordI p [Maj3, Maj5, Min7]
-chordMinD7 p = ChordI p [Min3, Maj5, Min7]
-chordMaj7 p = ChordI p [Maj3, Maj5, Maj7]
+chordPitches :: ChordQuality -> Pitch -> [Pitch]
+chordPitches q root = map (transpose root . intervalSemitones) $ chordIntervals q
 
-chordOnScale :: Scale -> Pitch -> [Int] -> Chord
-chordOnScale scale scaleRoot degrees =
-  let dists = map (scaleDegreeTonicDistance scale) degrees
-      dist0 = head dists
-  in
-  Chord (scaleRoot `transpose` head dists) (map (\d -> d - dist0) $ tail dists)
+voiceElemDuration :: VoiceElement -> Duration
+voiceElemDuration (PitchE _ d) = d
+voiceElemDuration (ChordE _ d) = d
+voiceElemDuration (SilenceE d) = d
+voiceElemDuration (VoicesE vs) = maximum (map voiceDuration vs)
+
+voiceDuration :: Voice -> Duration
+voiceDuration = sum . map voiceElemDuration
 
 shiftI :: Pitch -> Interval -> Pitch
 shiftI p i = p `transpose` intervalSemitones i
@@ -111,7 +122,7 @@ scaleDegreeFromName s name =
     num = maybeRead name
     n' = map toLower name
 
-scaleDegreeTonicDistance :: Scale -> ScaleDegree -> Int
+scaleDegreeTonicDistance :: Scale -> ScaleDegree -> Semitones
 scaleDegreeTonicDistance s deg =
   let a = (deg-1) `mod` (scaleLength s)
       b = (deg-1) `div` (scaleLength s)
@@ -121,7 +132,7 @@ scaleDegreeTonicDistance s deg =
 scaleDegreeSolfege :: Scale -> ScaleDegree -> String
 scaleDegreeSolfege s deg = scaleSolfege s !! (deg - 1)
 
-intervalSemitones :: Interval -> Int
+intervalSemitones :: Interval -> Semitones
 intervalSemitones i =
   case i of
     Unison -> 0
@@ -138,20 +149,19 @@ intervalSemitones i =
     Maj7 -> 11
     Oct -> 12
 
-notesFromVoice :: Voice -> SequencedVoice
+notesFromVoice :: Voice -> NoteSeq
 notesFromVoice = sequence 0 where
   sequence _ [] = []
   sequence t0 (e:xs) = case e of
     SilenceE dt  -> sequence (t0+dt) xs
     PitchE p dt  -> (p, t0, t0+dt) : sequence (t0+dt) xs
-    ChordE ch dt -> chordNotes dt ch ++ sequence (t0+dt) xs
-    where
-      chordNotes dt (Chord root exts) =
-        (root, t0, t0+dt) : map extNote exts where
-          extNote i = (root `transpose` i, t0, t0+dt)
-      chordNotes dt (ChordI root ints) = chordNotes dt (Chord root (map intervalSemitones ints))
+    ChordE ch@(Chord quality root) dt ->
+      (map (\p -> (p, t0, t0+dt)) (chordPitches quality root)) ++ sequence (t0+dt) xs
+    VoicesE vs -> (sortBy (comparing (\(_,t0,_) -> t0)) . concat $ map notesFromVoice vs) ++
+                  sequence (t0+dt) xs
+                  where dt = voiceDuration [VoicesE vs]
 
-mapTempo :: (Time -> Time) -> SequencedVoice -> SequencedVoice
+mapTempo :: (Time -> Time) -> NoteSeq -> NoteSeq
 mapTempo f = map g where
   g (p,t0,dt) = (p, f t0, f dt)
 
