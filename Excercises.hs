@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 module Excercises where
 
 import Control.Applicative
@@ -25,7 +26,6 @@ simpleContextGen cadenceGen tonality = do
   let contextRoot = (root tonality) `changeOctave` contextOctave
   return $ cadenceGen (scale tonality) contextRoot
   
-
 randomTonesQuery :: Int -> CadenceFun -> Query [ScaleDegree]
 randomTonesQuery len cadenceGen =
   Query {

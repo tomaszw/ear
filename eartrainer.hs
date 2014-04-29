@@ -27,8 +27,9 @@ data Flag
   | ScaleType String
   | LargeRange
   | MidiPgm String
-  | GuessChord
   | Degrees String
+  | ExcerciseType String
+  | Range String
     deriving (Eq, Show)
 
 smallToneRange  = ToneRange 3 4
@@ -79,7 +80,6 @@ options =
   [ Option ['r'] [] (NoArg RandomKey) "randomize key"
   , Option ['k'] [] (ReqArg KeyRoot "PITCH") "specify key, such as C,C#,D,D#,E,F,F#,G,G#,B"
   , Option ['n'] [] (ReqArg Notes "NUMBER") "number of notes to guess at once"
-  , Option ['c'] [] (NoArg GuessChord) "group notes to guess in a chord"
   , Option ['q'] [] (ReqArg Questions "NUMBER") "number of questions in exercise"
   , Option ['t'] [] (ReqArg NotesTempo "BPM") "tempo for note playback"
   , Option ['d'] [] (ReqArg Device "DEVICE") "playback midi device"
@@ -87,6 +87,8 @@ options =
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
   , Option ['p'] [] (ReqArg MidiPgm "NUMBER") "midi program to use for melodies"
   , Option ['x'] [] (ReqArg Degrees "DEGREES") "pick scale degrees to use"
+  , Option ['e'] [] (ReqArg ExcerciseType "STRING") "type of excercise melody/group/progression"
+  , Option [] ["range"] (ReqArg Range "OCTAVE-OCTAVE") "tone range for excercise, in octaves"
   ]
 
 parseRequest :: String -> Request
@@ -216,7 +218,8 @@ main = do
       questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
       degreesstr = foldr getDegrees [] flags
-      asCh = GuessChord `elem` flags
+      exetype = foldr getExeType "melody" flags
+      toneR = foldr getRange mediumToneRange flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
       (scaleType,cadence) = foldr getST (majorScale,cad' cadence_maj_IV_V7_I) flags
@@ -234,19 +237,27 @@ main = do
       getQuestions _ x = x
       getDegrees (Degrees str) _ = str
       getDegrees _ x = x
+      getExeType (ExcerciseType str) _ = str
+      getExeType _ x = x
+      getRange (Range str) _ = case catMaybes (map maybeRead (splitBy '-' str)) of
+        [a,b] -> ToneRange a b
+        _ -> error "bad tone range"
+      getRange _ x = x
       getKeyRoot (KeyRoot str) x = case pitchFromName str of
         Just p -> p
         _ -> error $ "bad pitch name " ++ str
       getKeyRoot _ x = x
 
   let degs = parseDegrees degreesstr scaleType
-      tonality = Tonality scaleType degs keyRoot mediumToneRange
-      q | not asCh = randomTonesQuery notes cadence
-        | otherwise = randomToneGroupQuery notes cadence
-  Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise tonality notesTempo questions pgm) q 1
-  putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
-  
+      tonality = Tonality scaleType degs keyRoot toneR
+  let runExe q = do
+      Stats correct wrong <- withPlayer device $ \p ->
+        excercise p (Excercise tonality notesTempo questions pgm) q 1
+      putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
+  case exetype of
+    "melody" -> runExe $ randomTonesQuery notes cadence
+    "group" -> runExe $ randomToneGroupQuery notes cadence
+    s -> error $ "bad exercise: " ++ s
   where
     header = "usage: "
   
