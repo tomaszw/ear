@@ -6,13 +6,23 @@ import Data.Word
 import Data.Maybe
 import Data.List (sortBy, maximum)
 import Data.Ord
-import System.Random
 
 import Pitch
 
 type Duration = Double
 type Time = Double
 newtype BPM = BPM Int deriving (Eq,Show)
+
+data ToneRange
+   = ToneRange { minOctave :: Int, maxOctave :: Int } deriving (Eq,Show)
+
+data Tonality
+   = Tonality {
+     scale :: Scale
+   , degrees :: [ScaleDegree]
+   , root :: Pitch
+   , range :: ToneRange
+   } deriving (Eq, Show)
 
 data Interval =
     Unison | Min2 | Maj2 | Min3 | Maj3 | Maj4
@@ -168,11 +178,3 @@ maybeRead :: Read a => String -> Maybe a
 maybeRead s = case reads s of
   [(x, _)] -> Just x
   _ -> Nothing
-
-randomInt :: Int -> Int -> IO Int
-randomInt min max = getStdRandom (randomR (min,max))
-
-randomElement :: [a] -> IO a
-randomElement xs = do
-  v <- randomInt 0 (length xs - 1)
-  return $ xs !! v

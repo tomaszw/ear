@@ -12,7 +12,9 @@ import System.IO
 
 import Pitch
 import Music
+import RandomMusic
 import Scales
+import Excercises
 import Player
 
 data Flag
@@ -29,32 +31,9 @@ data Flag
   | Degrees String
     deriving (Eq, Show)
 
-type CadenceFun = Scale -> Pitch -> Voice
-
-data ToneRange
-   = ToneRange { minOctave :: Int, maxOctave :: Int } deriving (Eq,Show)
-
 smallToneRange  = ToneRange 3 4
 mediumToneRange = ToneRange 3 5
 largeToneRange  = ToneRange 2 5
-
-data Tonality
-   = Tonality {
-     scale :: Scale
-   , degrees :: [ScaleDegree]
-   , root :: Pitch
-   , range :: ToneRange
-   } deriving (Eq, Show)
-
-defaultTonality = Tonality majorScale [] pitchC0 mediumToneRange
-
-data Query a
-   = Query {
-       qGenerateContext :: Tonality -> IO Voice
-     , qGenerateQuery   :: Tonality -> IO (Voice,a)
-     , qVerify          :: Tonality -> a -> String -> Bool
-     , qDescribeAnswer  :: Tonality -> a -> String
-     }
 
 data Excercise
    = Excercise {
@@ -169,110 +148,6 @@ splitBy x xs =
       xs'   = splitBy x $ dropWhile (== x) q in
   if null p then xs' else p : xs'
 
-parseDegrees :: String -> Scale -> [ScaleDegree]
-parseDegrees str scale = catMaybes . map (scaleDegreeFromName scale) $ splitBy ',' str
-
-simpleContextGen :: CadenceFun -> Tonality -> IO Voice
-simpleContextGen cadenceGen tonality = do
-  contextOctave <- randomOctave tonality
-  let contextRoot = (root tonality) `changeOctave` contextOctave
-  return $ cadenceGen (scale tonality) contextRoot
-  
-randomTonesQuery :: Int -> CadenceFun -> Query [ScaleDegree]
-randomTonesQuery len cadenceGen =
-  Query {
-     qGenerateContext = simpleContextGen cadenceGen
-   , qGenerateQuery = genQuery
-   , qVerify = verify
-   , qDescribeAnswer = describe
-   }
-  where
-    genQuery tonality = do
-      (pitches, degs) <- unzip <$> randomNotes len tonality False
-      let voice = map (\p -> PitchE p 1) pitches
-      return (voice, degs)
-
-    verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
-    describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
-
-randomToneGroupQuery :: Int -> CadenceFun -> Query [ScaleDegree]
-randomToneGroupQuery len cadenceGen =
-  Query {
-     qGenerateContext = simpleContextGen cadenceGen
-   , qGenerateQuery = genQuery
-   , qVerify = verify
-   , qDescribeAnswer = describe
-   }
-  where
-    genQuery tonality = do
-      (pitches, degs) <- unzip . noteSort <$> randomNotes len tonality False
-      let voice = [VoicesE (map (\p -> [PitchE p 1]) pitches)]
-      return (voice, degs)
-      where
-        noteSort = sortBy (comparing (\(p,d) -> pitchValue p))
-        
-    verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
-    describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
-
-verifyDegreesStr :: Scale -> [ScaleDegree] -> String -> Bool
-verifyDegreesStr s correctDegrees answerStr =
-      case catMaybes $ map (scaleDegreeFromName s) answer of
-        ds | length ds == length answer
-           , length ds == length correctDegrees
-           , all correct (zip [1..] ds)
-              -> True
-        _ -> False
-      where
-        answer = words answerStr
-        correct (index, degree) =
-          degree == correctDegrees !! (index-1)
-
-randomProgression :: Int -> Tonality -> IO [([Pitch],ScaleDegree)]
-randomProgression count tonality = do
-  (notes,degrees) <- unzip <$> randomNotes count tonality True
-  qs <- sequence $ replicate count (randomElement qualities)
-  progression <- mapM mkChord $ zip notes qs
-  return $ zip progression degrees
-  where
-    qualities = [ChMaj,ChMin]
-    mkChord (n,q) = return $ chordPitches q n 0
-
-randomNotes :: Int -> Tonality -> Bool -> IO [(Pitch,ScaleDegree)]
-randomNotes count tonality dupes = gen count
-  where
-    s = scale tonality
-    r = root tonality
-    maxO = maxOctave (range tonality)
-    minO = minOctave (range tonality)
-    octaveSpan = maxO - minO + 1
-    degs = degrees tonality
-
-    gen 0 = return []
-    gen n = do
-      xs <- gen (n-1)
-      let loop = do
-            x  <- randomNote
-            case () of
-              _ | dupes -> return x
-              _ | not (x `elem` xs) -> return x
-              _ -> loop
-      x <- loop
-      return (x:xs)
-
-    randomNote = do
-      let l = scaleLength s
-      degree <- case degs of
-        [] -> randomInt 1 l
-        _  -> randomElement degs
-      octave <- randomInt 0 (octaveSpan - 1)
-      let d = degree + octave * l
-      let pitch   = scaleDegreePitch s (r `changeOctave` minO) d
-          solfege = scaleDegreeSolfege s degree
-      return (pitch, normaliseDegree s degree)
-
-randomOctave :: Tonality -> IO Int
-randomOctave t = randomInt (minOctave $ range t) (maxOctave $ range t)
-
 excercise :: Player -> Excercise -> Query a -> Int -> IO Stats
 excercise p ex _ q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise tonality notesTempo numQuestions pgm) query currentQ = do
@@ -325,6 +200,9 @@ scaleOfStr "min" = (minorScale, cad' cadence_min_IV_V7_I)
 scaleOfStr "blu" = (bluesScale, scaleCadence)
 
 scaleOfStr _ = error "unknown scale"
+
+parseDegrees :: String -> Scale -> [ScaleDegree]
+parseDegrees str scale = catMaybes . map (scaleDegreeFromName scale) $ splitBy ',' str
 
 main = do
   args_ <- getArgs
