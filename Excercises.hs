@@ -54,11 +54,30 @@ randomToneGroupQuery len cadenceGen =
   where
     genQuery tonality = do
       (pitches, degs) <- unzip . noteSort <$> randomNotes len tonality False
-      let voice = [VoicesE (map (\p -> [PitchE p 1]) pitches)]
+      let voice = [ParVoicesE (map (\p -> [PitchE p 1]) pitches)]
       return (voice, degs)
       where
         noteSort = sortBy (comparing (\(p,d) -> pitchValue p))
         
+    verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
+    describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
+
+randomProgressionQuery :: Int -> CadenceFun -> Query [ScaleDegree]
+randomProgressionQuery len cadenceGen =
+  Query {
+     qGenerateContext = simpleContextGen cadenceGen
+   , qGenerateQuery = genQuery
+   , qVerify = verify
+   , qDescribeAnswer = describe
+   }
+  where
+    genQuery tonality = do
+      (chords, degs) <- unzip <$> randomProgression len tonality
+      let voice = map (\chord -> ParVoicesE (map (\p -> [PitchE p 1]) chord)) chords
+      putStrLn (show voice)
+      putStrLn (show $ notesFromVoice $ voice)
+      return (voice, degs)
+
     verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
     describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
 

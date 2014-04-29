@@ -257,6 +257,7 @@ main = do
   case exetype of
     "melody" -> runExe $ randomTonesQuery notes cadence
     "group" -> runExe $ randomToneGroupQuery notes cadence
+    "progression" -> runExe $ randomProgressionQuery notes cadence
     s -> error $ "bad exercise: " ++ s
   where
     header = "usage: "

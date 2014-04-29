@@ -60,7 +60,7 @@ data VoiceElement =
     PitchE Pitch Duration
   | ChordE Chord Duration
   | SilenceE Duration
-  | VoicesE [Voice]
+  | ParVoicesE [Voice]
   deriving (Eq, Show)
            
 type NoteSeq = [(Pitch,Duration,Duration)]
@@ -86,7 +86,7 @@ voiceElemDuration :: VoiceElement -> Duration
 voiceElemDuration (PitchE _ d) = d
 voiceElemDuration (ChordE _ d) = d
 voiceElemDuration (SilenceE d) = d
-voiceElemDuration (VoicesE vs) = maximum (map voiceDuration vs)
+voiceElemDuration (ParVoicesE vs) = maximum (map voiceDuration vs)
 
 voiceDuration :: Voice -> Duration
 voiceDuration = sum . map voiceElemDuration
@@ -166,9 +166,9 @@ notesFromVoice = sequence 0 where
     PitchE p dt  -> (p, t0, t0+dt) : sequence (t0+dt) xs
     ChordE ch@(Chord quality root inversion) dt ->
       (map (\p -> (p, t0, t0+dt)) (chordPitches quality root inversion)) ++ sequence (t0+dt) xs
-    VoicesE vs -> (sortBy (comparing (\(_,t0,_) -> t0)) . concat $ map notesFromVoice vs) ++
+    ParVoicesE vs -> (sortBy (comparing (\(_,t0,_) -> t0)) . concat $ map (sequence t0) vs) ++
                   sequence (t0+dt) xs
-                  where dt = voiceDuration [VoicesE vs]
+                  where dt = voiceDuration [e]
 
 mapTempo :: (Time -> Time) -> NoteSeq -> NoteSeq
 mapTempo f = map g where
