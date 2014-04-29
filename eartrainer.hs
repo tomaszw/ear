@@ -172,25 +172,45 @@ splitBy x xs =
 parseDegrees :: String -> Scale -> [ScaleDegree]
 parseDegrees str scale = catMaybes . map (scaleDegreeFromName scale) $ splitBy ',' str
 
+simpleContextGen :: CadenceFun -> Tonality -> IO Voice
+simpleContextGen cadenceGen tonality = do
+  contextOctave <- randomOctave tonality
+  let contextRoot = (root tonality) `changeOctave` contextOctave
+  return $ cadenceGen (scale tonality) contextRoot
+  
 randomTonesQuery :: Int -> CadenceFun -> Query [ScaleDegree]
 randomTonesQuery len cadenceGen =
   Query {
-     qGenerateContext = genContext
+     qGenerateContext = simpleContextGen cadenceGen
    , qGenerateQuery = genQuery
    , qVerify = verify
    , qDescribeAnswer = describe
    }
   where
-    genContext tonality = do
-      contextOctave <- randomOctave tonality
-      let contextRoot = (root tonality) `changeOctave` contextOctave
-      return $ cadenceGen (scale tonality) contextRoot
-      
     genQuery tonality = do
       (pitches, degs) <- unzip <$> randomNotes len tonality False
       let voice = map (\p -> PitchE p 1) pitches
       return (voice, degs)
 
+    verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
+    describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
+
+randomToneGroupQuery :: Int -> CadenceFun -> Query [ScaleDegree]
+randomToneGroupQuery len cadenceGen =
+  Query {
+     qGenerateContext = simpleContextGen cadenceGen
+   , qGenerateQuery = genQuery
+   , qVerify = verify
+   , qDescribeAnswer = describe
+   }
+  where
+    genQuery tonality = do
+      (pitches, degs) <- unzip . noteSort <$> randomNotes len tonality False
+      let voice = [VoicesE (map (\p -> [PitchE p 1]) pitches)]
+      return (voice, degs)
+      where
+        noteSort = sortBy (comparing (\(p,d) -> pitchValue p))
+        
     verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr
     describe tonality ans = intercalate " " $ map (scaleDegreeSolfege (scale tonality)) ans
 
@@ -343,7 +363,8 @@ main = do
 
   let degs = parseDegrees degreesstr scaleType
       tonality = Tonality scaleType degs keyRoot mediumToneRange
-      q = randomTonesQuery notes cadence
+      q | not asCh = randomTonesQuery notes cadence
+        | otherwise = randomToneGroupQuery notes cadence
   Stats correct wrong <- withPlayer device $ \p ->
     excercise p (Excercise tonality notesTempo questions pgm) q 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
