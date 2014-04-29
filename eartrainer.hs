@@ -4,6 +4,7 @@ import Control.Monad
 import Control.Applicative
 import Data.List
 import Data.Maybe
+import Data.Ord
 
 import System.Environment
 import System.Console.GetOpt
@@ -24,6 +25,7 @@ data Flag
   | ScaleType String
   | LargeRange
   | MidiPgm String
+  | GuessChord
     deriving (Eq, Show)
 
 type CadenceFun = Scale -> Pitch -> Voice
@@ -35,6 +37,7 @@ data Excercise
      , cadenceGen :: CadenceFun
      , notesTempo :: Int
      , largeRange :: Bool
+     , asChord :: Bool
      , numNotes :: Int
      , numQuestions :: Int
      , midiPgm :: Int
@@ -61,6 +64,7 @@ data Request
    | PlayContext
    | PlayQuestion
    | PlayTonic
+   | PlayTones [String]
    | Next
    | Help
    | Other String
@@ -75,6 +79,7 @@ options =
   [ Option ['r'] [] (NoArg RandomKey) "randomize key"
   , Option ['k'] [] (ReqArg KeyRoot "PITCH") "specify key, such as C,C#,D,D#,E,F,F#,G,G#,B"
   , Option ['n'] [] (ReqArg Notes "NUMBER") "number of notes to guess at once"
+  , Option ['c'] [] (NoArg GuessChord) "group notes to guess in a chord"
   , Option ['q'] [] (ReqArg Questions "NUMBER") "number of questions in exercise"
   , Option ['t'] [] (ReqArg NotesTempo "BPM") "tempo for note playback"
   , Option ['d'] [] (ReqArg Device "DEVICE") "playback midi device"
@@ -83,7 +88,7 @@ options =
   , Option ['p'] [] (ReqArg MidiPgm "NUMBER") "midi program to use for melodies"
   ]
 
-defaultExcercise = Excercise pitchC0 majorScale (cad' cadence_maj_IV_V7_I) 0 False 1 1
+defaultExcercise = Excercise pitchC0 majorScale (cad' cadence_maj_IV_V7_I) 0 False False 1 1
 
 parseRequest :: String -> Request
 parseRequest "s" = PlayScale
@@ -94,6 +99,7 @@ parseRequest "h" = Help
 parseRequest "t" = PlayTonic
 parseRequest "n" = Next
 parseRequest "?" = Help
+parseRequest str | ("p" : tones) <- words str = PlayTones tones
 parseRequest str = Other str
 
 playMusic :: Player -> Music -> IO ()
@@ -123,20 +129,34 @@ askQuestion prompt handleRequest testAnswer =
 handleRequest :: Player -> Question -> Request -> IO ()
 handleRequest p q req = h req where
   tonicPitch = questionScaleRoot q `changeOctave` 4
+  scale = questionScale q
   h PlayScale    = playVoice p (BPM 120) 0 (map (\p -> PitchE p 1) pitches) where
                    pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
-                   scale = questionScale q
   h PlayContext  = playMusic p (questionContext q)
   h PlayQuestion   = playMusic p (question q)
   h PlayAll = playQuestion p q
   h PlayTonic    = playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
+  h (PlayTones tones) = playMusic p ((question q) { musicVoice = map (\p -> PitchE p 1) pitches }) where
+                        pitches = map (scaleDegreePitch scale tonicPitch) degrees
+                        degrees = catMaybes $ map (scaleDegreeFromName scale) tones
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
   
-randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> IO [(Pitch,ScaleDegree)]
-randomNotes count rootPitch scale minOctave maxOctave =
-  sequence $ replicate count randomNote
+randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> Bool -> IO [(Pitch,ScaleDegree)]
+randomNotes count rootPitch scale minOctave maxOctave dupes = gen count
   where
+    gen 0 = return []
+    gen n = do
+      xs <- gen (n-1)
+      let loop = do
+            x  <- randomNote
+            case () of
+              _ | dupes -> return x
+              _ | not (x `elem` xs) -> return x
+              _ -> loop
+      x <- loop
+      return (x:xs)
+
     octaveSpan = maxOctave - minOctave + 1
     randomNote = do
       degree <- randomInt 1 (octaveSpan * 12)
@@ -147,15 +167,18 @@ randomNotes count rootPitch scale minOctave maxOctave =
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale contextGen notesTempo
-                largeRange numNotes numQuestions pgm) currentQ = do
+                largeRange asChord numNotes numQuestions pgm) currentQ = do
     contextOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let contextRoot = root `changeOctave` contextOctave
     
     octave <- if largeRange then randomInt 1 4 else randomInt 2 3
-    (pitches,chosenDegrees) <- unzip <$> randomNotes numNotes root scale octave (octave+1)
+    (pitches,chosenDegrees) <- unzip . noteSort <$> randomNotes numNotes root scale octave (octave+1) (not asChord)
     let chosenSolfege = map (scaleDegreeSolfege scale) chosenDegrees
     let melodyRoot = root `changeOctave` octave
-        melody  = map (\p -> PitchE p 1) pitches
+        melody  =
+          if not asChord
+             then map (\p -> PitchE p 1) pitches
+             else [VoicesE (map (\p -> [PitchE p 1]) pitches)]
         quest   = Question {
             questionContext = Music (BPM 120) 0 (contextGen scale contextRoot)
           , questionScale = scale
@@ -193,11 +216,14 @@ excercise p ex@(Excercise root scale contextGen notesTempo
          then Stats (correct+1) wrong
          else Stats correct (wrong+1)
     where
+      noteSort | asChord = sortBy (comparing (\(p,d) -> pitchValue p))
+               | otherwise = id
+
       prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
       solfegeStr = intercalate " " $ take (scaleLength scale) (scaleSolfege scale)
       pitchDesc contextRoot (pitch, solfege) =
           solfege ++ "         -> " ++ show pitch ++ " in key " ++ (show contextRoot)
-
+      
 scaleCadence :: Scale -> Pitch -> Voice
 scaleCadence s root =
   map (\p -> PitchE p 0.5) pitches ++ [SilenceE 2] where
@@ -207,6 +233,7 @@ cad' c s r = c r
 
 scaleOfStr "maj" = (majorScale, cad' cadence_maj_IV_V7_I)
 scaleOfStr "chmaj" = (majorChScale, cad' cadence_maj_IV_V7_I)
+scaleOfStr "chmaj-" = (majorChScaleM, cad' cadence_maj_IV_V7_I)
 scaleOfStr "min" = (minorScale, cad' cadence_min_IV_V7_I)
 scaleOfStr "blu" = (bluesScale, scaleCadence)
 
@@ -223,6 +250,7 @@ main = do
       notesTempo = foldr getNotesTempo 30 flags
       questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
+      asCh = GuessChord `elem` flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
       (scaleType,cadence) = foldr getST (majorScale,cad' cadence_maj_IV_V7_I) flags
@@ -244,7 +272,7 @@ main = do
       getKeyRoot _ x = x
       
   Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange notes questions pgm) 1
+    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange asCh notes questions pgm) 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   
   where

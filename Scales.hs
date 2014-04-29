@@ -35,3 +35,6 @@ bluesScaleSolfege = ["do", "me", "fa", "fi", "so", "te"]
 majorChScale = Scale "chmajor" [Unison, Min2, Maj2, Min3, Maj3, Maj4, Aug4, Maj5, Min6, Maj6, Min7, Maj7] majorChScaleSolfege
 majorChScaleSolfege = ["do", "di", "re", "ri", "mi", "fa", "fi", "so", "si", "la", "li", "ti"]
 
+majorChScaleM = Scale "chmajor" [Min2, Min3, Aug4, Min6, Min7] majorChScaleMSolfege
+majorChScaleMSolfege = ["di", "ri", "fi", "si", "li"]
+
