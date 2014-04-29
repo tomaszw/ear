@@ -26,6 +26,7 @@ data Flag
   | LargeRange
   | MidiPgm String
   | GuessChord
+  | Degrees String
     deriving (Eq, Show)
 
 type CadenceFun = Scale -> Pitch -> Voice
@@ -41,6 +42,7 @@ data Excercise
      , numNotes :: Int
      , numQuestions :: Int
      , midiPgm :: Int
+     , degreesToUse :: [ScaleDegree]
      }
 
 data Music
@@ -86,6 +88,7 @@ options =
   , Option ['s'] [] (ReqArg ScaleType "SCALE") "type of scale (maj/min)"
   , Option ['l'] [] (NoArg LargeRange) "large tone range"
   , Option ['p'] [] (ReqArg MidiPgm "NUMBER") "midi program to use for melodies"
+  , Option ['x'] [] (ReqArg Degrees "DEGREES") "pick scale degrees to use"
   ]
 
 defaultExcercise = Excercise pitchC0 majorScale (cad' cadence_maj_IV_V7_I) 0 False False 1 1
@@ -141,9 +144,29 @@ handleRequest p q req = h req where
                         degrees = catMaybes $ map (scaleDegreeFromName scale) tones
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
+
+splitBy :: (Eq a) => a -> [a] -> [[a]]
+splitBy _ [] = []
+splitBy x xs =
+  let (p,q) = break (== x) xs
+      xs'   = splitBy x $ dropWhile (== x) q in
+  if null p then xs' else p : xs'
+
+parseDegrees :: String -> Scale -> [ScaleDegree]
+parseDegrees str scale = catMaybes . map (scaleDegreeFromName scale) $ splitBy ',' str
+
+{-
+randomProgression :: Int -> Pitch -> Scale -> [ScaleDegree] -> Int -> Int -> IO [([Pitch],ScaleDegree)]
+randomProgression count rootPitch scale degs minOctave maxOctave = do
+  notes <- randomNotes count rootPitch scale degs minOctave maxOctave True
+  qi <- randomElement qualities
   
-randomNotes :: Int -> Pitch -> Scale -> Int -> Int -> Bool -> IO [(Pitch,ScaleDegree)]
-randomNotes count rootPitch scale minOctave maxOctave dupes = gen count
+  where
+    qualities = [Major,Minor]
+-}
+
+randomNotes :: Int -> Pitch -> Scale -> [ScaleDegree] -> Int -> Int -> Bool -> IO [(Pitch,ScaleDegree)]
+randomNotes count rootPitch scale degs minOctave maxOctave dupes = gen count
   where
     gen 0 = return []
     gen n = do
@@ -159,20 +182,25 @@ randomNotes count rootPitch scale minOctave maxOctave dupes = gen count
 
     octaveSpan = maxOctave - minOctave + 1
     randomNote = do
-      degree <- randomInt 1 (octaveSpan * 12)
-      let pitch   = scaleDegreePitch scale (rootPitch `changeOctave` minOctave) degree
+      let l = scaleLength scale
+      degree <- case degs of
+        [] -> randomInt 1 l
+        _  -> randomElement degs
+      octave <- randomInt 0 (octaveSpan - 1)
+      let d = degree + octave * scaleLength scale
+      let pitch   = scaleDegreePitch scale (rootPitch `changeOctave` minOctave) d
           solfege = scaleDegreeSolfege scale degree
       return (pitch, normaliseDegree scale degree)
   
 excercise :: Player -> Excercise -> Int -> IO Stats
 excercise p ex q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise root scale contextGen notesTempo
-                largeRange asChord numNotes numQuestions pgm) currentQ = do
+                largeRange asChord numNotes numQuestions pgm degs) currentQ = do
     contextOctave <- if largeRange then randomInt 2 5 else randomInt 3 4
     let contextRoot = root `changeOctave` contextOctave
     
     octave <- if largeRange then randomInt 1 4 else randomInt 2 3
-    (pitches,chosenDegrees) <- unzip . noteSort <$> randomNotes numNotes root scale octave (octave+1) (not asChord)
+    (pitches,chosenDegrees) <- unzip . noteSort <$> randomNotes numNotes root scale degs octave (octave+2) (not asChord)
     let chosenSolfege = map (scaleDegreeSolfege scale) chosenDegrees
     let melodyRoot = root `changeOctave` octave
         melody  =
@@ -250,6 +278,7 @@ main = do
       notesTempo = foldr getNotesTempo 30 flags
       questions = foldr getQuestions 10 flags
       keyRoot = foldr getKeyRoot pitchC0 flags
+      degreesstr = foldr getDegrees [] flags
       asCh = GuessChord `elem` flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
@@ -266,13 +295,16 @@ main = do
       getNotesTempo _ x = x
       getQuestions (Questions str) _ = read str
       getQuestions _ x = x
+      getDegrees (Degrees str) _ = str
+      getDegrees _ x = x
       getKeyRoot (KeyRoot str) x = case pitchFromName str of
         Just p -> p
         _ -> error $ "bad pitch name " ++ str
       getKeyRoot _ x = x
-      
+
+  let degs = parseDegrees degreesstr scaleType
   Stats correct wrong <- withPlayer device $ \p ->
-    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange asCh notes questions pgm) 1
+    excercise p (Excercise keyRoot scaleType cadence notesTempo largeRange asCh notes questions pgm degs) 1
   putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   
   where

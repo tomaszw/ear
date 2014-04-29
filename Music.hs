@@ -35,14 +35,14 @@ type Semitones = Int
 type Solfege = [String]
 
 data ChordQuality =
-    ChMajor
-  | ChMinor
-  | ChMajor7
-  | ChMajorD7
-  | ChMinorD7
+    ChMaj
+  | ChMin
+  | ChMaj7
+  | ChMajD7
+  | ChMinD7
   deriving (Eq, Show)
 
-data Chord = Chord ChordQuality Pitch
+data Chord = Chord ChordQuality Pitch Int
              deriving (Eq, Show)
 
 type Voice = [VoiceElement]
@@ -56,14 +56,21 @@ data VoiceElement =
 type NoteSeq = [(Pitch,Duration,Duration)]
 
 chordIntervals :: ChordQuality -> [Interval]
-chordIntervals ChMajor = [Unison, Maj3, Maj5]
-chordIntervals ChMinor = [Unison, Min3, Maj5]
-chordIntervals ChMajor7 = [Unison, Maj3, Maj5, Maj7]
-chordIntervals ChMajorD7 = [Unison, Maj3, Maj5, Min7]
-chordIntervals ChMinorD7 = [Unison, Min3, Maj5, Min7]
+chordIntervals ChMaj = [Unison, Maj3, Maj5]
+chordIntervals ChMin = [Unison, Min3, Maj5]
+chordIntervals ChMaj7 = [Unison, Maj3, Maj5, Maj7]
+chordIntervals ChMajD7 = [Unison, Maj3, Maj5, Min7]
+chordIntervals ChMinD7 = [Unison, Min3, Maj5, Min7]
 
-chordPitches :: ChordQuality -> Pitch -> [Pitch]
-chordPitches q root = map (transpose root . intervalSemitones) $ chordIntervals q
+chordPitches :: ChordQuality -> Pitch -> Int -> [Pitch]
+chordPitches q root inversion =
+  invert inversion $ map (transpose root . intervalSemitones) $ chordIntervals q
+  where
+    invert _ [] = []
+    invert 0 ps = ps
+    invert n (p:ps) | n > 0 = invert (n-1) $ ps ++ [p]
+    invert n ps     | n < 0 = invert (n+1) $ head rev : reverse (tail rev)
+                              where rev = reverse ps
 
 voiceElemDuration :: VoiceElement -> Duration
 voiceElemDuration (PitchE _ d) = d
@@ -147,8 +154,8 @@ notesFromVoice = sequence 0 where
   sequence t0 (e:xs) = case e of
     SilenceE dt  -> sequence (t0+dt) xs
     PitchE p dt  -> (p, t0, t0+dt) : sequence (t0+dt) xs
-    ChordE ch@(Chord quality root) dt ->
-      (map (\p -> (p, t0, t0+dt)) (chordPitches quality root)) ++ sequence (t0+dt) xs
+    ChordE ch@(Chord quality root inversion) dt ->
+      (map (\p -> (p, t0, t0+dt)) (chordPitches quality root inversion)) ++ sequence (t0+dt) xs
     VoicesE vs -> (sortBy (comparing (\(_,t0,_) -> t0)) . concat $ map notesFromVoice vs) ++
                   sequence (t0+dt) xs
                   where dt = voiceDuration [VoicesE vs]

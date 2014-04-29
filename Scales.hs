@@ -3,24 +3,24 @@ module Scales where
 import Pitch
 import Music
 
-ch r dur q i = ChordE (Chord q (r `transpose` i)) dur
+ch r dur q i = ChordE (Chord q (r `transpose` i) 0) dur
 
 cadence_maj_IV_V7_I :: Pitch -> Voice
 cadence_maj_IV_V7_I r =
   [
-    ch r 1.5 ChMajor Maj4
-  , ch r 1.2 ChMajorD7 Maj5
-  , ch r 0.75 ChMajorD7 Maj5
-  , ch r 3.0 ChMajor Unison
+    ch r 1.5 ChMaj Maj4
+  , ch r 1.2 ChMajD7 Maj5
+  , ch r 0.75 ChMajD7 Maj5
+  , ch r 3.0 ChMaj Unison
   ]
 
 cadence_min_IV_V7_I :: Pitch -> Voice
 cadence_min_IV_V7_I r =
   [
-    ch r 1.5 ChMinor Maj4
-  , ch r 1.2 ChMinorD7 Maj5
-  , ch r 0.75 ChMinorD7 Maj5
-  , ch r 3.0 ChMinor Unison
+    ch r 1.5 ChMin Maj4
+  , ch r 1.2 ChMinD7 Maj5
+  , ch r 0.75 ChMinD7 Maj5
+  , ch r 3.0 ChMin Unison
   ]
 
 majorScale = Scale "major" [Unison, Maj2, Maj3, Maj4, Maj5, Maj6, Maj7] majorScaleSolfege
