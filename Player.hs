@@ -82,6 +82,7 @@ playVoice p@(Player h _ q conn) (BPM bpm) pgm v = do
   _ <- Event.drainOutput h
   _ <- Event.outputPending h
   waitForEcho p
+  return ()
   where
     notes = notesFromVoice v
     endTime = voiceDuration v

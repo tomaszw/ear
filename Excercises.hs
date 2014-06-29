@@ -74,8 +74,6 @@ randomProgressionQuery len cadenceGen =
     genQuery tonality = do
       (chords, degs) <- unzip <$> randomProgression len tonality
       let voice = map (\chord -> ParVoicesE (map (\p -> [PitchE p 1]) chord)) chords
-      putStrLn (show voice)
-      putStrLn (show $ notesFromVoice $ voice)
       return (voice, degs)
 
     verify tonality correctDegrees answerStr = verifyDegreesStr (scale tonality) correctDegrees answerStr

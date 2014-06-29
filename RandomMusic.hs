@@ -14,7 +14,9 @@ randomProgression count tonality = do
   return $ zip progression degrees
   where
     qualities = [ChMaj,ChMin]
-    mkChord (n,q) = return $ chordPitches q n 0
+    mkChord (n,q) =
+      do inv <- randomInt 0 2
+         return $ chordPitches q n inv
 
 randomNotes :: Int -> Tonality -> Bool -> IO [(Pitch,ScaleDegree)]
 randomNotes count tonality dupes = gen count

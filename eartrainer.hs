@@ -2,13 +2,14 @@ module Main where
 
 import Control.Monad
 import Control.Applicative
-import Data.List
+import Data.List hiding (transpose)
 import Data.Maybe
 import Data.Ord
 
 import System.Environment
 import System.Console.GetOpt
 import System.IO
+import Control.Concurrent
 
 import Pitch
 import Music
@@ -30,6 +31,7 @@ data Flag
   | Degrees String
   | ExcerciseType String
   | Range String
+  | ContextEvery String
     deriving (Eq, Show)
 
 smallToneRange  = ToneRange 3 4
@@ -42,6 +44,7 @@ data Excercise
      , notesTempo :: Int
      , numQuestions :: Int
      , midiPgm :: Int
+     , contextFrequency :: Int
      }
 
 data Music
@@ -69,7 +72,7 @@ data Request
    | Next
    | Help
    | Other String
-
+     deriving Show
 data Stats
    = Stats {
        correct :: Int
@@ -88,6 +91,7 @@ options =
   , Option ['p'] [] (ReqArg MidiPgm "NUMBER") "midi program to use for melodies"
   , Option ['x'] [] (ReqArg Degrees "DEGREES") "pick scale degrees to use"
   , Option ['e'] [] (ReqArg ExcerciseType "STRING") "type of excercise melody/group/progression"
+  , Option ['c'] [] (ReqArg ContextEvery "NUMBER") "play context cadence every NUMBER questions"
   , Option [] ["range"] (ReqArg Range "OCTAVE-OCTAVE") "tone range for excercise, in octaves"
   ]
 
@@ -109,9 +113,9 @@ playMusic p m = playVoice p (musicTempo m) (musicPgm m) (musicVoice m)
 playQuestion :: Player -> Question -> IO ()
 playQuestion p q = playMusic p (questionContext q) >> playMusic p (question q)
 
-askQuestion :: String -> (Request -> IO a) -> (String -> Bool) -> IO Int
-askQuestion prompt handleRequest testAnswer =
-  handleRequest PlayAll >> ask 1
+askQuestion :: String -> Request -> (Request -> IO a) -> (String -> Bool) -> IO Int
+askQuestion prompt playR handleRequest testAnswer =
+  doreq >> ask 1
   where
     ask attempts =
       do putStr prompt
@@ -121,12 +125,12 @@ askQuestion prompt handleRequest testAnswer =
            Next -> return 0
            Other str ->
              case words str of
-               [] -> handleRequest PlayAll >> ask attempts
+               [] -> doreq >> ask attempts
                _  -> case testAnswer str of
                  True -> putStrLn "GOOD!" >> return attempts
                  _    -> putStrLn "NO!"   >> ask (attempts+1)
            req -> handleRequest req >> ask attempts
-
+    doreq = handleRequest playR
 handleRequest :: Player -> Question -> Request -> IO ()
 handleRequest p q req = h req where
   tonicPitch = questionScaleRoot q `changeOctave` 4
@@ -150,21 +154,26 @@ splitBy x xs =
       xs'   = splitBy x $ dropWhile (== x) q in
   if null p then xs' else p : xs'
 
-excercise :: Player -> Excercise -> Query a -> Int -> IO Stats
-excercise p ex _ q | q > numQuestions ex = return $ Stats 0 0
-excercise p ex@(Excercise tonality notesTempo numQuestions pgm) query currentQ = do
+excercise :: Player -> Excercise -> Bool -> Query a -> Int -> IO Stats
+excercise p ex _ _ q | q > numQuestions ex = return $ Stats 0 0
+excercise p ex@(Excercise tonality' notesTempo numQuestions pgm contextFreq) randomKey query currentQ = do
+    tonality <- updateTonality
     context <- qGenerateContext query tonality
     (voice,qdata) <- qGenerateQuery query tonality
 
     let
         quest   = Question {
             questionContext = Music (BPM 120) 0 context
-          , questionScale = s
-          , questionScaleRoot = r
+          , questionScale = s tonality
+          , questionScaleRoot = r tonality
           , question = Music (BPM notesTempo) pgm voice
           }
 
-    guessedIn <- askQuestion prompt (handleRequest p quest) (qVerify query tonality qdata)
+        playReq = case contextFreq of
+          0 -> PlayAll
+          n | ((currentQ-1) `mod` n) == 0 -> PlayAll
+          _ -> PlayQuestion
+    guessedIn <- askQuestion (prompt tonality) playReq (\x -> {-void . forkIO . void $-} handleRequest p quest x) (qVerify query tonality qdata)
     when (guessedIn == 0) $ do
       putStrLn "Correct answer was:"
       putStrLn $ "  " ++ qDescribeAnswer query tonality qdata
@@ -177,16 +186,24 @@ excercise p ex@(Excercise tonality notesTempo numQuestions pgm) query currentQ =
                Other "" -> return ()
                _ -> handleRequest p quest req >> loopReq
     loopReq
-    Stats correct wrong <- excercise p ex query (currentQ+1)
+    Stats correct wrong <- excercise p ex randomKey query (currentQ+1)
     return $ 
       if guessedIn == 1
          then Stats (correct+1) wrong
          else Stats correct (wrong+1)
     where
-      s = scale tonality
-      r = root tonality
-      prompt = show currentQ ++ ". [" ++ solfegeStr ++ "] >> "
-      solfegeStr = intercalate " " $ take (scaleLength s) (scaleSolfege s)
+      s t = scale t
+      r t = root t
+      prompt t = show currentQ ++ ". [" ++ solfegeStr t ++ "] >> "
+      solfegeStr t = intercalate " " $ take (scaleLength $ s t) (scaleSolfege $ s t)
+      updateTonality = do
+        if not randomKey
+           then return tonality'
+           else do
+             randomKeyRoot <- do
+               n <- randomInt 0 12
+               return (pitchC0 `transpose` n)
+             return $ tonality' { root = randomKeyRoot } 
     
 scaleCadence :: Scale -> Pitch -> Voice
 scaleCadence s root =
@@ -220,6 +237,7 @@ main = do
       degreesstr = foldr getDegrees [] flags
       exetype = foldr getExeType "melody" flags
       toneR = foldr getRange mediumToneRange flags
+      contextE = foldr getContextEvery 1 flags
       randomKey = RandomKey `elem` flags
       largeRange = LargeRange `elem` flags
       (scaleType,cadence) = foldr getST (majorScale,cad' cadence_maj_IV_V7_I) flags
@@ -239,6 +257,9 @@ main = do
       getDegrees _ x = x
       getExeType (ExcerciseType str) _ = str
       getExeType _ x = x
+      getContextEvery (ContextEvery str) _ = read str
+      getContextEvery _ x = x
+      
       getRange (Range str) _ = case catMaybes (map maybeRead (splitBy '-' str)) of
         [a,b] -> ToneRange a b
         _ -> error "bad tone range"
@@ -252,7 +273,7 @@ main = do
       tonality = Tonality scaleType degs keyRoot toneR
   let runExe q = do
       Stats correct wrong <- withPlayer device $ \p ->
-        excercise p (Excercise tonality notesTempo questions pgm) q 1
+        excercise p (Excercise tonality notesTempo questions pgm contextE) randomKey q 1
       putStrLn $ "CORRECT " ++ show correct ++ " out of " ++ show (correct+wrong)
   case exetype of
     "melody" -> runExe $ randomTonesQuery notes cadence
