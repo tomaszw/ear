@@ -16,18 +16,33 @@ import qualified Sound.ALSA.Sequencer.Time as Time
 import qualified Sound.ALSA.Sequencer as SndSeq
 import qualified Sound.ALSA.Sequencer.Connect as Connect
 import qualified Sound.ALSA.Exception as AlsaExc
-
+import qualified Control.Concurrent.Event as CCEv
 import Pitch
 import Music
 
 import Control.Monad.Trans.Cont (ContT(ContT), runContT )
 import Control.Monad.IO.Class (liftIO, )
-import Control.Monad (zipWithM_, )
+import Control.Monad (zipWithM_, forever)
 import Control.Concurrent
 import Data.Word
 
-data Player = Player (SndSeq.T SndSeq.DuplexMode) Port.T Queue.T Connect.T
+data Player
+   = Player {
+       pSeq :: SndSeq.T SndSeq.DuplexMode
+     , pPort :: Port.T
+     , pQue :: Queue.T
+     , pConn :: Connect.T
+     , pI :: MVar Word32
+     , pEv :: CCEv.Event
+     , pEchos :: MVar [Word32]
+     }
+
 newtype EventTime = EventTime Int deriving (Eq,Ord)
+
+timeEq (Time.Cons Time.Absolute (Time.Tick t1))
+       (Time.Cons Time.Absolute (Time.Tick t2))
+  = t1 == t2
+timeEq _ _ = False
 
 withPlayer :: String -> (Player -> IO a) -> IO a
 withPlayer device f = do
@@ -42,14 +57,19 @@ withPlayer device f = do
         let me = Addr.Cons c p
         conn <- Connect.createTo h p =<< Addr.parse h device
         Queue.control h q Event.QueueStart Nothing
-        f (Player h p q conn)
+        ev <- CCEv.new
+        es <- newMVar []
+        i <- newMVar 0
+        let pl = Player h p q conn i ev es
+        forkOS $ consumeEchos pl
+        f pl
 
-event (Player h p q conn) ev t =
+event (Player h p q conn _ _ _) ev t =
   Event.output h $
     (Event.forConnection conn ev) { Event.queue = q, Event.time = Time.consAbs (Time.Tick $ timeConv t) }
   
 queueNote :: Player -> (Pitch, Time, Time) -> IO ()
-queueNote player@(Player h p q conn) (pitch, t0, t1) = do
+queueNote player (pitch, t0, t1) = do
   let on = Event.NoteEv Event.NoteOn $
              Event.simpleNote
                (Event.Channel 0)
@@ -72,38 +92,62 @@ timeConv :: Time -> Word32
 timeConv t = round (t * 96)
 
 playVoice :: Player -> BPM -> Int -> Voice -> IO ()
-playVoice p@(Player h _ q conn) (BPM bpm) pgm v = do
+playVoice p (BPM bpm) pgm v = do
   Queue.control h q Event.QueueStart Nothing
   Queue.control h q (Event.QueueTempo (Event.Tempo (60000000 `div` fromIntegral bpm))) Nothing
   event p (Event.CtrlEv Event.PgmChange $ Event.Ctrl (Event.Channel 0) (Event.Parameter 0) (Event.Value $ fromIntegral pgm)) 0
   
   mapM_ (queueNote p) notes
-  echo p endTime
+  i <- modifyMVar (pI p) (\i -> return (i+1, i))
+  echo p endTime i
   _ <- Event.drainOutput h
   _ <- Event.outputPending h
-  waitForEcho p
+  waitForEcho p i
   return ()
   where
     notes = notesFromVoice v
     endTime = voiceDuration v
-    
-echo :: Player -> Time -> IO ()
-echo (Player h p q conn) time = do
+    h = pSeq p
+    q = pQue p
+
+echo :: Player -> Time -> Word32 -> IO ()
+echo p time x = do
   c <- Client.getId h
-  let me = Addr.Cons c p
-      ev = Event.CustomEv Event.Echo $ Event.Custom 0 0 0
+  let me = Addr.Cons c port
+      ev = Event.CustomEv Event.Echo $ Event.Custom x 0 0
   Event.output h $ (Event.forConnection conn ev) { Event.dest = me
                                                  , Event.queue = q
                                                  , Event.time = Time.consAbs (Time.Tick $ timeConv time) }
   return ()
+  where
+    h = pSeq p
+    port = pPort p
+    q = pQue p
+    conn = pConn p
+    
+waitForEcho p e = do
+  x <- test
+  case x of
+    True -> return ()
+    _ -> CCEv.wait (pEv p) >> waitForEcho p e
+  where
+    test = modifyMVar (pEchos p) $
+           \es -> return $
+                  if e `elem` es
+                  then (dropFirst e es, True)
+                  else (es, False)
+    dropFirst x [] = []
+    dropFirst x (y:ys)
+      | x == y    = ys
+      | otherwise = y : dropFirst x ys
 
-waitForEcho pl@(Player h p q conn) = do
+consumeEchos p@(Player h port q conn _ ev echos) = do
   c <- Client.getId h
-  let me = Addr.Cons c p
-  event <- Event.input h
-  case Event.body event of
-    Event.CustomEv Event.Echo _d ->
-      if Event.source event == me
-      then return ()
-      else waitForEcho pl
-    _ -> putStrLn ("Event: " ++ show event) >> waitForEcho pl
+  let me = Addr.Cons c port
+  forever $ do
+    event <- Event.input h
+    case Event.body event of
+      Event.CustomEv Event.Echo (Event.Custom x _ _) -> do
+        modifyMVar_ echos (\xs -> return (x:xs))
+        CCEv.signal ev
+      _ -> putStrLn ("event: " ++ show event)

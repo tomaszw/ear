@@ -135,13 +135,14 @@ handleRequest :: Player -> Question -> Request -> IO ()
 handleRequest p q req = h req where
   tonicPitch = questionScaleRoot q `changeOctave` 4
   scale = questionScale q
-  h PlayScale    = playVoice p (BPM 120) 0 (map (\p -> PitchE p 1) pitches) where
+  bg = void . forkIO
+  h PlayScale    = bg $ playVoice p (BPM 120) 0 (map (\p -> PitchE p 1) pitches) where
                    pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
-  h PlayContext  = playMusic p (questionContext q)
-  h PlayQuestion   = playMusic p (question q)
-  h PlayAll = playQuestion p q
-  h PlayTonic    = playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
-  h (PlayTones tones) = playMusic p ((question q) { musicVoice = map (\p -> PitchE p 1) pitches }) where
+  h PlayContext  = bg $ playMusic p (questionContext q)
+  h PlayQuestion   = bg $ playMusic p (question q)
+  h PlayAll = bg $ playQuestion p q
+  h PlayTonic    = bg $ playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
+  h (PlayTones tones) = bg $ playMusic p ((question q) { musicVoice = map (\p -> PitchE p 1) pitches }) where
                         pitches = map (scaleDegreePitch scale tonicPitch) degrees
                         degrees = catMaybes $ map (scaleDegreeFromName scale) tones
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
