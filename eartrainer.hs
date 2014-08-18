@@ -216,6 +216,7 @@ cad' c s r = c r
 scaleOfStr "maj" = (majorScale, cad' cadence_maj_IV_V7_I)
 scaleOfStr "chmaj" = (majorChScale, cad' cadence_maj_IV_V7_I)
 scaleOfStr "chmaj-" = (majorChScaleM, cad' cadence_maj_IV_V7_I)
+scaleOfStr "chmin" = (majorChScale, cad' cadence_min_IV_V7_I)
 scaleOfStr "min" = (minorScale, cad' cadence_min_IV_V7_I)
 scaleOfStr "blu" = (bluesScale, scaleCadence)
 

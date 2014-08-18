@@ -22,7 +22,7 @@ import Music
 
 import Control.Monad.Trans.Cont (ContT(ContT), runContT )
 import Control.Monad.IO.Class (liftIO, )
-import Control.Monad (zipWithM_, forever)
+import Control.Monad (zipWithM_, forever, void)
 import Control.Concurrent
 import Data.Word
 
@@ -59,14 +59,16 @@ withPlayer device f = do
         Queue.control h q Event.QueueStart Nothing
         ev <- CCEv.new
         es <- newMVar []
-        i <- newMVar 0
+        i  <- newMVar 0
         let pl = Player h p q conn i ev es
-        forkOS $ consumeEchos pl
+        forkOS $ consumeEvents pl
         f pl
 
 event (Player h p q conn _ _ _) ev t =
   Event.output h $
-    (Event.forConnection conn ev) { Event.queue = q, Event.time = Time.consAbs (Time.Tick $ timeConv t) }
+    (Event.forConnection conn ev)
+        { Event.queue = q
+        , Event.time  = Time.consAbs (Time.Tick $ timeConv t) }
   
 queueNote :: Player -> (Pitch, Time, Time) -> IO ()
 queueNote player (pitch, t0, t1) = do
@@ -91,19 +93,27 @@ queueNotes p notes = mapM_ (queueNote p) notes
 timeConv :: Time -> Word32
 timeConv t = round (t * 96)
 
+nextI :: Player -> IO Word32
+nextI p = modifyMVar (pI p) (\i -> return (i+1, i))
+
 playVoice :: Player -> BPM -> Int -> Voice -> IO ()
 playVoice p (BPM bpm) pgm v = do
   Queue.control h q Event.QueueStart Nothing
   Queue.control h q (Event.QueueTempo (Event.Tempo (60000000 `div` fromIntegral bpm))) Nothing
-  event p (Event.CtrlEv Event.PgmChange $ Event.Ctrl (Event.Channel 0) (Event.Parameter 0) (Event.Value $ fromIntegral pgm)) 0
+  event p
+        (Event.CtrlEv Event.PgmChange $
+           Event.Ctrl
+            (Event.Channel 0)
+            (Event.Parameter 0)
+            (Event.Value $ fromIntegral pgm))
+        0
   
   mapM_ (queueNote p) notes
-  i <- modifyMVar (pI p) (\i -> return (i+1, i))
+  i <- nextI p
   echo p endTime i
   _ <- Event.drainOutput h
   _ <- Event.outputPending h
   waitForEcho p i
-  return ()
   where
     notes = notesFromVoice v
     endTime = voiceDuration v
@@ -115,21 +125,23 @@ echo p time x = do
   c <- Client.getId h
   let me = Addr.Cons c port
       ev = Event.CustomEv Event.Echo $ Event.Custom x 0 0
-  Event.output h $ (Event.forConnection conn ev) { Event.dest = me
-                                                 , Event.queue = q
-                                                 , Event.time = Time.consAbs (Time.Tick $ timeConv time) }
-  return ()
+  void . Event.output h
+    $ (Event.forConnection conn ev)
+                     { Event.dest = me
+                     , Event.queue = q
+                     , Event.time = Time.consAbs (Time.Tick $ timeConv time) }
   where
     h = pSeq p
     port = pPort p
     q = pQue p
     conn = pConn p
-    
+
+waitForEcho :: Player -> Word32 -> IO ()
 waitForEcho p e = do
   x <- test
   case x of
     True -> return ()
-    _ -> CCEv.wait (pEv p) >> waitForEcho p e
+    _    -> CCEv.wait (pEv p) >> waitForEcho p e
   where
     test = modifyMVar (pEchos p) $
            \es -> return $
@@ -141,7 +153,8 @@ waitForEcho p e = do
       | x == y    = ys
       | otherwise = y : dropFirst x ys
 
-consumeEchos p@(Player h port q conn _ ev echos) = do
+consumeEvents :: Player -> IO ()
+consumeEvents p@(Player h port q conn _ ev echos) = do
   c <- Client.getId h
   let me = Addr.Cons c port
   forever $ do
