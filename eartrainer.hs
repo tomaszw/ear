@@ -60,6 +60,7 @@ data Question
      , questionScale :: Scale
      , questionScaleRoot :: Pitch
      , question :: Music
+     , questionHint :: Music
      }
 
 data Request
@@ -71,6 +72,7 @@ data Request
    | PlayTones [String]
    | Next
    | Help
+   | Hint
    | Other String
      deriving Show
 data Stats
@@ -100,7 +102,7 @@ parseRequest "s" = PlayScale
 parseRequest "r" = PlayAll
 parseRequest "c" = PlayContext
 parseRequest "m" = PlayQuestion
-parseRequest "h" = Help
+parseRequest "h" = Hint
 parseRequest "t" = PlayTonic
 parseRequest "n" = Next
 parseRequest "?" = Help
@@ -140,6 +142,7 @@ handleRequest p q req = h req where
                    pitches = take (scaleLength scale + 1) $ scalePitches scale tonicPitch
   h PlayContext  = bg $ playMusic p (questionContext q)
   h PlayQuestion   = bg $ playMusic p (question q)
+  h Hint = bg $ playMusic p (questionHint q)
   h PlayAll = bg $ playQuestion p q
   h PlayTonic    = bg $ playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
   h (PlayTones tones) = bg $ playMusic p ((question q) { musicVoice = map (\p -> PitchE p 1) pitches }) where
@@ -160,7 +163,7 @@ excercise p ex _ _ q | q > numQuestions ex = return $ Stats 0 0
 excercise p ex@(Excercise tonality' notesTempo numQuestions pgm contextFreq) randomKey query currentQ = do
     tonality <- updateTonality
     context <- qGenerateContext query tonality
-    (voice,qdata) <- qGenerateQuery query tonality
+    (voice,hint,qdata) <- qGenerateQuery query tonality
 
     let
         quest   = Question {
@@ -168,6 +171,7 @@ excercise p ex@(Excercise tonality' notesTempo numQuestions pgm contextFreq) ran
           , questionScale = s tonality
           , questionScaleRoot = r tonality
           , question = Music (BPM notesTempo) pgm voice
+          , questionHint = Music (BPM notesTempo) pgm hint
           }
 
         playReq = case contextFreq of
