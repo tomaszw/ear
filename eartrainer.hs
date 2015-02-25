@@ -146,8 +146,11 @@ handleRequest p q req = h req where
   h PlayAll = bg $ playQuestion p q
   h PlayTonic    = bg $ playVoice p (BPM 120) 0 [PitchE tonicPitch 4]
   h (PlayTones tones) = bg $ playMusic p ((question q) { musicVoice = map (\p -> PitchE p 1) pitches }) where
-                        pitches = map (scaleDegreePitch scale tonicPitch) degrees
-                        degrees = catMaybes $ map (scaleDegreeFromName scale) tones
+                        degoct name = case splitBy '-' name of
+                            (d:o:_) -> fmap (flip (,) (read o)) (scaleDegreeFromName scale d)
+                            (d:_)   -> fmap (flip (,) 4) (scaleDegreeFromName scale d)
+                        pitches = map (\(d,o) -> scaleDegreePitch scale (changeOctave tonicPitch o) d) degrees
+                        degrees = catMaybes $ map degoct tones
   h Help         = putStrLn "'r' - repeat/play full question 'c' - play cadence 'm' - play melody 's' - play scale 'h' - help"
   h _            = return ()
 
