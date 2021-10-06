@@ -1,0 +1,24 @@
+Name: ear
+Version: 0.0
+Author: Tomasz Wroblewski
+Build-Type: Simple
+Cabal-Version: >= 1.2
+
+Executable ear
+  hs-source-dirs: .
+  Main-is: eartrainer.hs
+  other-modules: Excercises Music Pitch Player RandomMusic Scales
+  GHC-Options: -O2 -fwarn-incomplete-patterns -threaded
+  Extensions: ScopedTypeVariables,GeneralizedNewtypeDeriving, GADTs, ExistentialQuantification, MultiParamTypeClasses, RankNTypes, PatternGuards, ForeignFunctionInterface, FlexibleContexts,FlexibleInstances,DeriveDataTypeable, OverloadedStrings
+  Build-Depends:
+        base,
+        mtl,
+        time,
+        binary,
+        bytestring,
+        containers,
+        text,
+        process, filepath,
+        random,
+        PortMidi
+
